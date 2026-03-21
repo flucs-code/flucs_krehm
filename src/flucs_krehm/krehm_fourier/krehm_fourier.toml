@@ -1,0 +1,5 @@
+[parameters]
+tau = 1.0  # T_i / T_e
+Z = 1.0  # q_i = Z e
+rhos = 1.0
+de = 1.0
