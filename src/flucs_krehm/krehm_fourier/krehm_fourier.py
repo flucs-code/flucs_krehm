@@ -11,6 +11,7 @@ from cupy.cuda import cufft
 from flucs.diagnostic import FlucsDiagnostic
 from flucs.solvers.fourier.fourier_system import FourierSystem
 from flucs.utilities.cupy import cupy_set_device_pointer
+from flucs.input import InvalidFlucsInputFileError
 
 
 class KREHMFourier(FourierSystem):
@@ -181,15 +182,138 @@ class KREHMFourier(FourierSystem):
         # (resolution checks, etc)
         super()._interpret_input()
 
-        # Anything custom goes here
+        # Helper function for a parameter setting
+        def _set_or_check(values: dict[str, float | None],
+                         name: str,
+                         value: float):
+            
+            current = values[name]
+
+            if current is None:
+                values[name] = value
+                return True
+
+            if not np.isclose(current, value, rtol=1e-8, atol=0.0):
+                raise InvalidFlucsInputFileError(
+                    f"Inconsistent value for parameters.{name}: "
+                    f"{current} and {value} do not agree."
+                )
+
+            return False
+
+        # Check ion charge
+        ion_charge = self.input["parameters.ion_charge"]
+        if ion_charge <= 0.0 or not float(ion_charge).is_integer():
+            raise InvalidFlucsInputFileError(
+                "parameters.ion_charge must be a positive integer."
+            )
+        ion_charge = int(ion_charge)
+
+        # Load inputs
+        values = {}
+        for name in ("beta_over_mass_ratio", "Ti_over_Te", "rhos", "rhoi", "de"):
+            value = self.input[f"parameters.{name}"]
+            values[name] = value if value > 0.0 else None
+
+        # If all lengthscales are unset, assume we are simulating RMHD
+        rmhd_limit = False
+        if (
+            values["rhos"] is None
+            and values["rhoi"] is None
+            and values["de"] is None
+            ):
+            rmhd_limit = True
+
+            small = 1e-6
+            print(f"Assuming RMHD limit, setting all lengthscales to {small}")
+            
+            values["beta_over_mass_ratio"] = None
+            values["Ti_over_Te"] = 1.0
+            values["rhoi"] = small
+            values["de"] = small
+
+        # Iterate over values and update until we have determined as many as possible\
+        changed = True
+        while changed:
+            changed = False
+
+            # Infer values irrespective of the value of rmhd_limit
+            if values["rhoi"] is not None and values["rhos"] is not None:
+                changed |= _set_or_check(
+                    values,
+                    "Ti_over_Te",
+                    0.5 * ion_charge * (values["rhoi"] / values["rhos"]) ** 2,
+                )
+
+            if values["rhos"] is not None and values["de"] is not None:
+                changed |= _set_or_check(
+                    values,
+                    "beta_over_mass_ratio",
+                    2.0 * ion_charge * (values["rhos"] / values["de"]) ** 2,
+                )
+
+            if values["rhoi"] is not None and values["Ti_over_Te"] is not None:
+                changed |= _set_or_check(
+                    values,
+                    "rhos",
+                    values["rhoi"]
+                    / np.sqrt(2.0 * values["Ti_over_Te"] / ion_charge),
+                )
+
+            # Only infer values if we are not in the rmhd_limit
+            if not rmhd_limit and values["rhos"] is not None and values["Ti_over_Te"] is not None:
+                changed |= _set_or_check(
+                    values,
+                    "rhoi",
+                    values["rhos"]
+                    * np.sqrt(2.0 * values["Ti_over_Te"] / ion_charge),
+                )
+
+            if not rmhd_limit and values["de"] is not None and values["beta_over_mass_ratio"] is not None:
+                changed |= _set_or_check(
+                    values,
+                    "rhos",
+                    values["de"]
+                    * np.sqrt(values["beta_over_mass_ratio"]
+                            / (2.0 * ion_charge)),
+                )
+
+            if not rmhd_limit and values["rhos"] is not None and values["beta_over_mass_ratio"] is not None:
+                changed |= _set_or_check(
+                    values,
+                    "de",
+                    values["rhos"]
+                    * np.sqrt(2.0 * ion_charge
+                            / values["beta_over_mass_ratio"]),
+                )
+
+        # Report missing parameters, if any
+        missing = [
+            name for name in ("Ti_over_Te", "rhos", "de")
+            if values[name] is None
+        ]
+        if missing:
+            raise InvalidFlucsInputFileError(
+                "Insufficient KREHM parameters to determine "
+                f"{', '.join(missing)}."
+            )
+
+        # Derived parameters
+        self.beta_over_mass_ratio = values["beta_over_mass_ratio"]
+        self.Ti_over_Te = values["Ti_over_Te"]
+        self.ion_charge = ion_charge
+        self.rhoi = values["rhoi"]
+
+        # Core parameters
+        self.Ti_over_ZTe = self.Ti_over_Te / self.ion_charge
+        self.rhos = values["rhos"]
+        self.de = values["de"]
 
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels
-        tau = self.input["parameters.tau"]
-        Z = self.input["parameters.Z"]
-        self.module_options.define_float("TAU_OVER_Z", tau / Z)
-        self.module_options.define_float("RHOS2", self.input["parameters.rhos"]**2)
-        self.module_options.define_float("DE2", self.input["parameters.de"]**2)
+        self.module_options.define_float("TI_OVER_ZTE", self.Ti_over_ZTe)
+        self.module_options.define_float("RHOS2", self.rhos**2)
+        self.module_options.define_float("DE2", self.de**2)
 
         # Call this to compile the module
         super().compile_cupy_module()
