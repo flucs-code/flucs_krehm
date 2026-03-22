@@ -12,7 +12,7 @@ FLUCS_FLOAT get_taubarinv(const size_t ikx, const size_t iky, const FLUCS_FLOAT 
     if (ikx == 0 && iky == 0)
         return FLOAT_ONE; 
         
-    const FLUCS_FLOAT alpha = (0.5 * TI_OVER_ZTE * RHOS2) * (kperp2);
+    const FLUCS_FLOAT alpha = (TI_OVER_ZTE * RHOS2) * (kperp2);
     // TODO: stable implementation of this thing
     return (FLOAT_ONE / TI_OVER_ZTE) * (FLOAT_ONE - exp(-alpha) * cyl_bessel_i0(alpha));
 }
