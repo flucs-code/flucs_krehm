@@ -1,7 +1,5 @@
 [parameters]
-beta_over_mass_ratio = -1.0
 Ti_over_Te = 1.0
 ion_charge = 1.0
-rhos = -1.0
 rhoi = -1.0
 de = -1.0

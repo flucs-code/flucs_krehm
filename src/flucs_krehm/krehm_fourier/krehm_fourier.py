@@ -13,9 +13,11 @@ from flucs.solvers.fourier.fourier_system import FourierSystem
 from flucs.utilities.cupy import cupy_set_device_pointer
 from flucs.input import InvalidFlucsInputFileError
 
+from .krehm_fourier_diagnostics import FreeEnergyDiag
+
 
 class KREHMFourier(FourierSystem):
-    """Fourier solver for the KREHM system."""
+    """Fourier solver for the isothermal KREHM system."""
     number_of_fields = 2
 
     # DFT plans
@@ -46,9 +48,9 @@ class KREHMFourier(FourierSystem):
     cfl_rate: cp.ndarray
 
     # Supported diagnostics
-    # diags: ClassVar[set[type[FlucsDiagnostic]]] = {
-    #     HeatfluxDiag, FreeEnergyDiag
-    # }
+    diags: ClassVar[set[type[FlucsDiagnostic]]] = {
+        FreeEnergyDiag
+    }
 
     def _setup_system(self):
         """Prepares the system for the solver."""
@@ -118,8 +120,8 @@ class KREHMFourier(FourierSystem):
             # 1 dyphi,
             # 2 dxA
             # 3 dyA
-            # 4 taubarinv_phi
-            # 5 Amkperp2de2A
+            # 4 one_minus_gamma0_over_alpha kperp2 phi
+            # 5 kperp2 A
             self.dft_derivatives_and_bits = cp.zeros([6,
                                                       self.padded_nz,
                                                       self.padded_nx,
@@ -137,10 +139,13 @@ class KREHMFourier(FourierSystem):
             # They are transformed back to Fourier space, where any additional
             # derivatives are taken by multiplying the NL bits by the
             # appropriate powers of k. The NL bits here are
-            # 0 dxphi * taubarinv_phi + rhos2 * dxA * Amkperp2de2A
-            # 1 dyphi * taubarinv_phi + rhos2 * dyA * Amkperp2de2A
-            # 2 dxphi * Amkperp2de2A + dxA * taubarinv_phi
-            # 3 dyphi * Amkperp2de2A + dyA * taubarinv_phi
+            # 0 dxphi * one_minus_gamma0_over_alpha kperp2 phi + dxA * kperp2 A
+            # 1 dyphi * one_minus_gamma0_over_alpha kperp2 phi + dyA * kperp2 A
+            # 2 de2 * dxphi * kperp2 A
+            #   - 0.5 * rhoi2 (Z/tau) dxA * (1 - Gamma0)/alpha kperp2 phi
+            # 3 de2 * dyphi * kperp2 A
+            #   - 0.5 * rhoi2 (Z/tau) dyA * (1 - Gamma0)/alpha kperp2 phi
+            # 4 dxphi * dyA - dyphi * dxA
 
             # Still need dft_bits as FourierSystem expects it
             self.dft_bits = self.dft_derivatives_and_bits
@@ -170,7 +175,7 @@ class KREHMFourier(FourierSystem):
                 idist=self.padded_nz*self.padded_nx*self.padded_ny,
                 odist=self.padded_nz*self.padded_nx*self.half_padded_ny,
                 fft_type=self.fft_r2c_plan_type,
-                batch=4,
+                batch=5,
                 order='C',
                 last_axis=3,
                 last_size=self.half_padded_ny)
@@ -182,11 +187,22 @@ class KREHMFourier(FourierSystem):
         # (resolution checks, etc)
         super()._interpret_input()
 
+        # Check and set all physical parameters
+        # self._interpret_physical_parameters()
+
+    def _interpret_physical_parameters(self):
+        """Makes sure that the user has specified a consistent set ot
+        parameters and infers any implicit parameters.
+
+        Currently unused.
+
+        """
+
         # Helper function for a parameter setting
         def _set_or_check(values: dict[str, float | None],
                          name: str,
                          value: float):
-            
+
             current = values[name]
 
             if current is None:
@@ -311,9 +327,14 @@ class KREHMFourier(FourierSystem):
 
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels
-        self.module_options.define_float("TI_OVER_ZTE", self.Ti_over_ZTe)
-        self.module_options.define_float("RHOS2", self.rhos**2)
-        self.module_options.define_float("DE2", self.de**2)
+        tau = self.input["parameters.Ti_over_Te"]
+        ion_charge = self.input["parameters.ion_charge"]
+        rhoi = self.input["parameters.rhoi"]
+        de = self.input["parameters.de"]
+
+        self.module_options.define_float("ZTE_OVER_TI", ion_charge / tau)
+        self.module_options.define_float("RHOI2", rhoi**2)
+        self.module_options.define_float("DE2", de**2)
 
         # Call this to compile the module
         super().compile_cupy_module()
