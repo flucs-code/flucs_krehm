@@ -35,7 +35,7 @@ class KREHMFourier(FourierSystem):
 
     # Direct pointers to fields
     phi: list[cp.ndarray]
-    A: list[cp.ndarray]
+    apar: list[cp.ndarray]
 
     # Nonlinear terms with multistep history
     multistep_nonlinear_terms: cp.ndarray
@@ -94,7 +94,7 @@ class KREHMFourier(FourierSystem):
                                dtype=self.complex,
                                memptr=self.fields[1][0, 0, 0, 0].data),]
 
-        self.A = [cp.ndarray((self.nz, self.nx, self.half_ny),
+        self.apar = [cp.ndarray((self.nz, self.nx, self.half_ny),
                              dtype=self.complex,
                              memptr=self.fields[0][1, 0, 0, 0].data),
                   cp.ndarray((self.nz, self.nx, self.half_ny),
@@ -116,12 +116,12 @@ class KREHMFourier(FourierSystem):
 
             # All fields and derivatives to be transformed to real space
             # The first index indexes the fields and it's meaning is
-            # 0 dxphi
-            # 1 dyphi,
-            # 2 dxA
-            # 3 dyA
-            # 4 one_minus_gamma0_over_alpha kperp2 phi
-            # 5 kperp2 A
+            # 0: dx_phi
+            # 1: dy_phi,
+            # 2: dx_apar
+            # 3: dy_apar
+            # 4: one_minus_gamma0_over_alpha kperp2 phi
+            # 5: kperp2 apar
             self.dft_derivatives_and_bits = cp.zeros([6,
                                                       self.padded_nz,
                                                       self.padded_nx,
@@ -139,13 +139,15 @@ class KREHMFourier(FourierSystem):
             # They are transformed back to Fourier space, where any additional
             # derivatives are taken by multiplying the NL bits by the
             # appropriate powers of k. The NL bits here are
-            # 0 dxphi * one_minus_gamma0_over_alpha kperp2 phi + dxA * kperp2 A
-            # 1 dyphi * one_minus_gamma0_over_alpha kperp2 phi + dyA * kperp2 A
-            # 2 de2 * dxphi * kperp2 A
-            #   - 0.5 * rhoi2 (Z/tau) dxA * (1 - Gamma0)/alpha kperp2 phi
-            # 3 de2 * dyphi * kperp2 A
-            #   - 0.5 * rhoi2 (Z/tau) dyA * (1 - Gamma0)/alpha kperp2 phi
-            # 4 dxphi * dyA - dyphi * dxA
+            # 0: dx_phi * one_minus_gamma0_over_alpha * kperp2 * phi 
+            #   - dx_apar * kperp2_apar
+            # 1: dy_phi * one_minus_gamma0_over_alpha * kperp2 * phi 
+            #   - dy_apar * kperp2_apar
+            # 2: de2 * dx_phi * kperp2 * apar
+            #   - 0.5 (Z/tau) rhoi2 * dx_apar * (1-Gamma0)/alpha * kperp2 * phi
+            # 3: de2 * dy_phi * kperp2 * apar
+            #   - 0.5 (Z/tau) rhoi2 * dy_apar * (1-Gamma0)/alpha * kperp2 * phi
+            # 4: dx_phi * dy_apar - dy_phi * dx_apar
 
             # Still need dft_bits as FourierSystem expects it
             self.dft_bits = self.dft_derivatives_and_bits
