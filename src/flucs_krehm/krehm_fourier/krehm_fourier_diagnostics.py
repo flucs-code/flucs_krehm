@@ -119,7 +119,6 @@ class FreeEnergyDiag(FlucsDiagnostic):
         self.save_data("W", self.result.get().item())
 
         # dW/dt
-
         self.dW_kzkx_kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
@@ -140,7 +139,6 @@ class FreeEnergyDiag(FlucsDiagnostic):
 
         dWdt = self.result.get().item() / self.system.current_dt
         self.save_data("dWdt", dWdt)
-
 
         # Hyperdissipation
         dWdt_hyperdissipation_total = 0.0
