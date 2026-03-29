@@ -24,7 +24,7 @@ def helicity_check(post):
         variables = post.get_netcdf_variables(nc_path)
 
         # Mask out initial data at restart boundaries given the calculation
-        # of dH/dt is not valid at the first time step
+        # of dH/dt is not valid at the first time step for a given run
         time, boundaries, _ = post.load_netcdf_variable(nc_path, "time")
         time[0] = np.nan
         for boundary in boundaries:
@@ -34,10 +34,9 @@ def helicity_check(post):
         dt = post.load_netcdf_variable(nc_path, "dt")[0]
         helicity = post.load_netcdf_variable(nc_path, "helicity/H")[0]
         dHdt = post.load_netcdf_variable(nc_path, "helicity/dHdt")[0]
-        # injection = post.load_netcdf_variable(nc_path, "helicity/dHdt_inj")[0]
-        # dissipation = post.load_netcdf_variable(nc_path, "helicity/dHdt_coll")[0]
-        injection = 0
-        dissipation = 0
+        dHdt_error = post.load_netcdf_variable(nc_path, "helicity/dHdt_error")[0]
+        injection = np.zeros_like(dHdt)
+        dissipation = np.zeros_like(dHdt)
 
         # Add hyperdissipation
         for variable in variables:
@@ -58,9 +57,17 @@ def helicity_check(post):
         ax_balance.plot(time, dissipation, label="Dissipation", linewidth=1.5, color='blue', linestyle='solid')
         # ax_balance.plot(time, injection + dissipation, label="Injection + dissipation", linewidth=1.5, color='black', linestyle='dashed')
 
-        # Plot error normalised to the timestep
-        error = (dHdt - injection - dissipation)/dt
-        ax_error.plot(time, np.abs(error / helicity), label="Error / (dt * H)", linewidth=1.5, color='black')
+        # Compute and plot measures of the error in the helicity balance
+        accumulated_error = np.full_like(time, np.nan, dtype=float)
+        accumulated_error[0] = 0.0
+        accumulated_error[1:] = np.abs(np.nancumsum(
+            0.5 * (dHdt_error[1:] + dHdt_error[:-1]) * np.diff(time)
+        )) / np.abs(np.maximum(helicity[0], np.average(helicity[1:], axis=0)))
+
+        instantaneous_error = np.abs(dHdt_error)/(np.abs(dHdt) + np.abs(injection) + np.abs(dissipation))
+
+        ax_error.plot(time, accumulated_error, label="Accumulated", linewidth=1.5, color='black', linestyle='solid')
+        ax_error.plot(time, instantaneous_error, label="Instantaneous", linewidth=1.5, color='blue', linestyle='solid')
 
         # Setting plot options
         ax_error.set_xlim(np.nanmin(time), np.nanmax(time))
@@ -69,7 +76,7 @@ def helicity_check(post):
 
         ax_helicity.legend()
         ax_balance.legend(ncols=2)
-        ax_error.legend()
+        ax_error.legend(ncols=2)
 
         # Save figures if required
         post.save(fig, name=figure_name, suffix="png", save_kwargs={"dpi": 300, "close": True})
