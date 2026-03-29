@@ -331,15 +331,97 @@ struct Helicity_Functor {
 
         const FLUCS_FLOAT cross_term = (
             phi.real() * apar.real() + phi.imag() * apar.imag()
-        )
+        );
 
         const FLUCS_FLOAT helicity = - ((FLUCS_FLOAT)2.0) * (
             one_minus_gamma0_over_alpha(kperp2) * kperp2 
             * (FLOAT_ONE + DE2 * kperp2) * cross_term
-        )
+        );
 
-        return multiplier * field_product;
+        return multiplier * helicity;
     }
 };
+
+__global__
+void helicity_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        Helicity_Functor{fields, FLOAT_ONE}
+    );
+}
+
+__global__
+void dH_kzkx(
+    const FLUCS_COMPLEX* fields_now,
+    const FLUCS_COMPLEX* fields_prev,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        Helicity_Functor{fields_now, FLOAT_ONE},
+        Helicity_Functor{fields_prev, -FLOAT_ONE}
+    );
+}
+
+__global__
+void H_hyperdissipation_kx_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKx_Functor<Helicity_Functor>{
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}
+        }
+    );
+}
+
+__global__
+void H_hyperdissipation_ky_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKy_Functor<Helicity_Functor>{
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}
+        }
+    );
+}
+
+__global__
+void H_hyperdissipation_kz_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKz_Functor<Helicity_Functor>{
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}
+        }
+    );
+}
+
+__global__
+void H_hyperdissipation_perp_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationPerp_Functor<Helicity_Functor>{
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}
+        }
+    );
+}
 
 } // extern "C"
