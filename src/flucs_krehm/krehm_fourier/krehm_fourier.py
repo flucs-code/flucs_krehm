@@ -242,15 +242,15 @@ class KREHMFourier(FourierSystem):
             )
 
         # Store final parameters
-        self.Ti_over_Te = self.float(Ti_over_Te)
-        self.ion_charge = self.float(ion_charge)
+        self.Ti_over_Te = Ti_over_Te
+        self.ion_charge = ion_charge
         self.ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
 
-        self.rhoi = self.float(rhoi)
-        self.rhos = self.float(np.sqrt(self.ion_charge / (2 * self.Ti_over_Te)) * self.rhoi)
+        self.rhoi = rhoi
+        self.rhos = np.sqrt(self.ion_charge / (2 * self.Ti_over_Te)) * self.rhoi
 
-        self.de = self.float(de)
-        self.beta_over_mass_ratio = self.float(beta_over_mass_ratio)
+        self.de = de
+        self.beta_over_mass_ratio = beta_over_mass_ratio
 
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels
