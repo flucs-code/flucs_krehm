@@ -13,7 +13,7 @@ from flucs.solvers.fourier.fourier_system import FourierSystem
 from flucs.utilities.cupy import cupy_set_device_pointer
 from flucs.input import InvalidFlucsInputFileError
 
-from .krehm_fourier_diagnostics import FreeEnergyDiag
+from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
 
 
 class KREHMFourier(FourierSystem):
@@ -49,7 +49,8 @@ class KREHMFourier(FourierSystem):
 
     # Supported diagnostics
     diags: ClassVar[set[type[FlucsDiagnostic]]] = {
-        FreeEnergyDiag
+        FreeEnergyDiag,
+        HelicityDiag
     }
 
     def _setup_system(self):
@@ -218,36 +219,38 @@ class KREHMFourier(FourierSystem):
         beta_over_mass_ratio = self.input["parameters.beta_over_mass_ratio"]
 
         # Handle finite beta parameters
-        if de > 0 and beta_over_mass_ratio > 0:
+        if de >= 0.0 and beta_over_mass_ratio > 0.0:
             raise InvalidFlucsInputFileError(
                 "Only one of the parameters.de and "
                 "parameters.beta_over_mass_ratio should be specified."
             )
 
-        if de > 0:
+        if de == 0.0:
+            beta_over_mass_ratio = np.inf
+        elif de > 0.0:
             beta_over_mass_ratio = (
                 (ion_charge**2 / Ti_over_Te) * (rhoi / de)**2
             )
-        elif beta_over_mass_ratio > 0:
+        elif beta_over_mass_ratio > 0.0:
             de = ion_charge * rhoi / np.sqrt(
                 Ti_over_Te * beta_over_mass_ratio
             )
         else:
             raise InvalidFlucsInputFileError(
-                "One of the parameters.de and "
-                "parameters.beta_over_mass_ratio must be positive."
+                "Please specify at least one of parameters.de and "
+                "parameters.beta_over_mass_ratio."
             )
 
         # Store final parameters
-        self.Ti_over_Te = Ti_over_Te
-        self.ion_charge = ion_charge
-        self.ZTe_over_Ti = ion_charge / Ti_over_Te
+        self.Ti_over_Te = self.float(Ti_over_Te)
+        self.ion_charge = self.float(ion_charge)
+        self.ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
 
-        self.rhoi = rhoi
-        self.rhos = np.sqrt(ion_charge / (2 * Ti_over_Te)) * rhoi
+        self.rhoi = self.float(rhoi)
+        self.rhos = self.float(np.sqrt(self.ion_charge / (2 * self.Ti_over_Te)) * self.rhoi)
 
-        self.de = de
-        self.beta_over_mass_ratio = beta_over_mass_ratio
+        self.de = self.float(de)
+        self.beta_over_mass_ratio = self.float(beta_over_mass_ratio)
 
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels
