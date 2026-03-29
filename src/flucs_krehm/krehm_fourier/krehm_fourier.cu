@@ -151,11 +151,11 @@ __global__ void find_nonlinear_bits(FLUCS_FLOAT* real_derivatives_and_bits,
     );
     real_derivatives_and_bits[real_index + 2*PADDEDSIZE] = (
         dx_phi * (DE2 * kperp2_apar)
-        - (0.5 * RHOI2 * ZTE_OVER_TI) * dx_apar * one_minus_gamma0_over_alpha_kperp2phi
+        - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dx_apar * one_minus_gamma0_over_alpha_kperp2phi
     );
     real_derivatives_and_bits[real_index + 3*PADDEDSIZE] = (
         dy_phi * (DE2 * kperp2_apar)
-        - (0.5 * RHOI2 * ZTE_OVER_TI) * dy_apar * one_minus_gamma0_over_alpha_kperp2phi
+        - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dy_apar * one_minus_gamma0_over_alpha_kperp2phi
     );
     real_derivatives_and_bits[real_index + 4*PADDEDSIZE] = dx_phi * dy_apar - dy_phi * dx_apar;
 }
@@ -263,7 +263,6 @@ void free_energy_kzkx(
 
 }
 
-
 __global__
 void dW_kzkx(
     const FLUCS_COMPLEX* fields_now,
@@ -314,5 +313,33 @@ void W_hyperdissipation_perp_kzkx(const FLUCS_COMPLEX* fields, FLUCS_FLOAT* outp
 }
 
 
+struct Helicity_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT multiplier;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        const FLUCS_COMPLEX phi = fields[index];
+        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const size_t ikx = indices.ikx;
+        const size_t iky = indices.iky;
+
+        const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        const FLUCS_FLOAT cross_term = (
+            phi.real() * apar.real() + phi.imag() * apar.imag()
+        )
+
+        const FLUCS_FLOAT helicity = - ((FLUCS_FLOAT)2.0) * (
+            one_minus_gamma0_over_alpha(kperp2) * kperp2 
+            * (FLOAT_ONE + DE2 * kperp2) * cross_term
+        )
+
+        return multiplier * field_product;
+    }
+};
 
 } // extern "C"
