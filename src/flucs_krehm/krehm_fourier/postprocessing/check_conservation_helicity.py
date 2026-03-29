@@ -64,7 +64,7 @@ def helicity_check(post):
 
         # Setting plot options
         ax_error.set_xlim(np.nanmin(time), np.nanmax(time))
-        ax_error.set_xlabel(r"(v_A/L_z)t")
+        ax_error.set_xlabel(r"$(v_A/L_z)t$")
         ax_error.set_yscale("log")
 
         ax_helicity.legend()
