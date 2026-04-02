@@ -305,6 +305,3 @@ class KREHMFourier(FourierSystem):
 
     def finish_time_step(self) -> None:
         super().finish_time_step()
-
-    def compute_complex_omega():
-        pass
