@@ -117,12 +117,12 @@ class KREHMFourier(FourierSystem):
 
             # All fields and derivatives to be transformed to real space
             # The first index indexes the fields and it's meaning is
-            # 0: dx_phi
-            # 1: dy_phi,
-            # 2: dx_apar
-            # 3: dy_apar
+            # 0: dxphi
+            # 1: dyphi,
+            # 2: dxapar
+            # 3: dyapar
             # 4: one_minus_gamma0_over_alpha kperp2 phi
-            # 5: kperp2 apar
+            # 5: kperp2apar
             self.dft_derivatives_and_bits = cp.zeros([6,
                                                       self.padded_nz,
                                                       self.padded_nx,
@@ -140,15 +140,15 @@ class KREHMFourier(FourierSystem):
             # They are transformed back to Fourier space, where any additional
             # derivatives are taken by multiplying the NL bits by the
             # appropriate powers of k. The NL bits here are
-            # 0: dx_phi * one_minus_gamma0_over_alpha * kperp2 * phi 
-            #   - dx_apar * kperp2_apar
-            # 1: dy_phi * one_minus_gamma0_over_alpha * kperp2 * phi 
-            #   - dy_apar * kperp2_apar
-            # 2: de2 * dx_phi * kperp2 * apar
-            #   - 0.5 (Z/tau) rhoi2 * dx_apar * (1-Gamma0)/alpha * kperp2 * phi
-            # 3: de2 * dy_phi * kperp2 * apar
-            #   - 0.5 (Z/tau) rhoi2 * dy_apar * (1-Gamma0)/alpha * kperp2 * phi
-            # 4: dx_phi * dy_apar - dy_phi * dx_apar
+            # 0: dxphi * one_minus_gamma0_over_alpha * kperp2 * phi 
+            #   - dxapar * kperp2apar
+            # 1: dyphi * one_minus_gamma0_over_alpha * kperp2 * phi 
+            #   - dyapar * kperp2apar
+            # 2: de2 * dxphi * kperp2 * apar
+            #   - 0.5 (Z/tau) rhoi2 * dxapar * (1-Gamma0)/alpha * kperp2 * phi
+            # 3: de2 * dyphi * kperp2 * apar
+            #   - 0.5 (Z/tau) rhoi2 * dyapar * (1-Gamma0)/alpha * kperp2 * phi
+            # 4: dxphi * dyapar - dyphi * dxapar
 
             # Still need dft_bits as FourierSystem expects it
             self.dft_bits = self.dft_derivatives_and_bits

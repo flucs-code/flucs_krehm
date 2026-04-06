@@ -77,27 +77,27 @@ __global__ void find_derivatives(const FLUCS_COMPLEX* fields,
     const FLUCS_COMPLEX phi = fields[index];
     const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
-    // dx_phi
+    // dxphi
     dft_derivatives[padded_index]\
         = FLUCS_COMPLEX(-kx * phi.imag(), kx * phi.real());
 
-    // dy_phi
+    // dyphi
     dft_derivatives[padded_index + HALFPADDEDSIZE]\
         = FLUCS_COMPLEX(-ky * phi.imag(), ky * phi.real());
 
-    // dx_apar
+    // dxapar
     dft_derivatives[padded_index + 2*HALFPADDEDSIZE]\
         = FLUCS_COMPLEX(-kx * apar.imag(), kx * apar.real());
 
-    // dy_apar
+    // dyapar
     dft_derivatives[padded_index + 3*HALFPADDEDSIZE]\
         = FLUCS_COMPLEX(-ky * apar.imag(), ky * apar.real());
 
-    // [(1 - Gamma0) / alpha] kperp2 phi
+    // [(1 - Gamma0) / alpha] kperp2phi
     dft_derivatives[padded_index + 4*HALFPADDEDSIZE]\
         = one_minus_gamma0_over_alpha(kperp2) * kperp2 * phi;
 
-    // kperp2_apar
+    // kperp2apar
     dft_derivatives[padded_index + 5*HALFPADDEDSIZE]\
         = kperp2 * apar;
 
@@ -115,15 +115,15 @@ __global__ void find_nonlinear_bits(FLUCS_FLOAT* real_derivatives_and_bits,
     if (!(real_index < PADDEDSIZE))
         return;
 
-    const FLUCS_FLOAT dx_phi = real_derivatives_and_bits[real_index];
-    const FLUCS_FLOAT dy_phi = real_derivatives_and_bits[real_index + PADDEDSIZE];
-    const FLUCS_FLOAT dx_apar = real_derivatives_and_bits[real_index + 2*PADDEDSIZE];
-    const FLUCS_FLOAT dy_apar = real_derivatives_and_bits[real_index + 3*PADDEDSIZE];
+    const FLUCS_FLOAT dxphi = real_derivatives_and_bits[real_index];
+    const FLUCS_FLOAT dyphi = real_derivatives_and_bits[real_index + PADDEDSIZE];
+    const FLUCS_FLOAT dxapar = real_derivatives_and_bits[real_index + 2*PADDEDSIZE];
+    const FLUCS_FLOAT dyapar = real_derivatives_and_bits[real_index + 3*PADDEDSIZE];
     const FLUCS_FLOAT one_minus_gamma0_over_alpha_kperp2phi = real_derivatives_and_bits[real_index + 4*PADDEDSIZE];
-    const FLUCS_FLOAT kperp2_apar = real_derivatives_and_bits[real_index + 5*PADDEDSIZE];
+    const FLUCS_FLOAT kperp2apar = real_derivatives_and_bits[real_index + 5*PADDEDSIZE];
 
 
-    const FLUCS_FLOAT cfl = flucs_fabs(dx_phi) * (NY / LY) + flucs_fabs(dy_phi) * (NX / LX);
+    const FLUCS_FLOAT cfl = flucs_fabs(dxphi) * (NY / LY) + flucs_fabs(dyphi) * (NX / LX);
 
     // Find max CFL using shared memory
     // TODO: Could we speed this up by reducing over warps?
@@ -144,20 +144,20 @@ __global__ void find_nonlinear_bits(FLUCS_FLOAT* real_derivatives_and_bits,
     }
 
     real_derivatives_and_bits[real_index]               = (
-        dx_phi * one_minus_gamma0_over_alpha_kperp2phi  - dx_apar * kperp2_apar
+        dxphi * one_minus_gamma0_over_alpha_kperp2phi  - dxapar * kperp2apar
     );
     real_derivatives_and_bits[real_index + PADDEDSIZE]  = (
-        dy_phi * one_minus_gamma0_over_alpha_kperp2phi  - dy_apar * kperp2_apar
+        dyphi * one_minus_gamma0_over_alpha_kperp2phi  - dyapar * kperp2apar
     );
     real_derivatives_and_bits[real_index + 2*PADDEDSIZE] = (
-        dx_phi * (DE2 * kperp2_apar)
-        - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dx_apar * one_minus_gamma0_over_alpha_kperp2phi
+        dxphi * (DE2 * kperp2apar)
+        - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dxapar * one_minus_gamma0_over_alpha_kperp2phi
     );
     real_derivatives_and_bits[real_index + 3*PADDEDSIZE] = (
-        dy_phi * (DE2 * kperp2_apar)
-        - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dy_apar * one_minus_gamma0_over_alpha_kperp2phi
+        dyphi * (DE2 * kperp2apar)
+        - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dyapar * one_minus_gamma0_over_alpha_kperp2phi
     );
-    real_derivatives_and_bits[real_index + 4*PADDEDSIZE] = dx_phi * dy_apar - dy_phi * dx_apar;
+    real_derivatives_and_bits[real_index + 4*PADDEDSIZE] = dxphi * dyapar - dyphi * dxapar;
 }
 
 __device__ void add_nonlinear_terms(const size_t index,
