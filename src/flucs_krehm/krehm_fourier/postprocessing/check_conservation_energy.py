@@ -58,16 +58,17 @@ def free_energy_check(post):
         # ax_balance.plot(time, injection + dissipation, label="Injection + dissipation", linewidth=1.5, color='black', linestyle='dashed')
 
         # Compute and plot measures of the error in the free-energy balance
+        integrand = 0.5 * (dWdt_error[1:] + dWdt_error[:-1]) * np.diff(time) # Manual trapezoidal rule 
+        normalisation = np.abs(np.maximum(free_energy[0], np.average(free_energy[1:]))) # For either decaying or steady-state problems
+
         accumulated_error = np.full_like(time, np.nan, dtype=float)
         accumulated_error[0] = 0.0
-        accumulated_error[1:] = np.abs(np.nancumsum(
-            0.5 * (dWdt_error[1:] + dWdt_error[:-1]) * np.diff(time)
-        )) / np.abs(np.maximum(free_energy[0], np.average(free_energy[1:], axis=0)))
+        accumulated_error[1:] = np.nancumsum(integrand)/normalisation
+ 
+        instantaneous_error = dWdt_error/(np.abs(dWdt) + np.abs(injection) + np.abs(dissipation))
 
-        instantaneous_error = np.abs(dWdt_error)/(np.abs(dWdt) + np.abs(injection) + np.abs(dissipation))
-
-        ax_error.plot(time, accumulated_error, label="Accumulated", linewidth=1.5, color='black', linestyle='solid')
-        ax_error.plot(time, instantaneous_error, label="Instantaneous", linewidth=1.5, color='blue', linestyle='solid')
+        ax_error.plot(time, np.abs(accumulated_error), label="Accumulated", linewidth=1.5, color='black', linestyle='solid')
+        ax_error.plot(time, np.abs(instantaneous_error), label="Instantaneous", linewidth=1.5, color='blue', linestyle='solid')
 
         # Setting plot options
         ax_error.set_xlim(np.nanmin(time), np.nanmax(time))
