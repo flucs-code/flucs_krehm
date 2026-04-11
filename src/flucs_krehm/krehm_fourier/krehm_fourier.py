@@ -59,9 +59,6 @@ class KREHMFourier(FourierSystem):
         self.allocate_memory()
         super()._setup_system()
 
-        # kperp = 0 fields do not evolve in a meaningful way
-        self.fields_initial[:, :, 0, 0] = 0
-
     def ready(self):
         # Anything system-specific goes here
 
@@ -305,3 +302,53 @@ class KREHMFourier(FourierSystem):
 
     def finish_time_step(self) -> None:
         super().finish_time_step()
+
+
+    def compute_linear_matrix_reference(self) -> np.ndarray:
+
+        # Initialise linear matrix
+        linear_matrix = np.zeros(
+            (
+            self.number_of_fields, 
+            self.number_of_fields, 
+            *self.half_unpadded_tuple
+            ),
+            dtype=self.complex,
+        )
+
+        # Get wavenumbers
+        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kperp2 = kx**2 + ky**2
+
+        # Get parameters
+        rhoi = self.rhoi
+        rhos = self.rhos
+        de = self.de
+        ZTe_over_Ti = self.ZTe_over_Ti
+
+        # Construct useful functions
+        alpha = 0.5 * (kperp2) * (rhoi**2)
+        gamma0 = np.i0(alpha) * np.exp(-alpha)
+        taubarinv = ZTe_over_Ti * (1.0 - gamma0)
+        one_minus_gamma0_over_alpha = np.divide(
+            1.0 - gamma0, 
+            alpha, 
+            out=np.ones_like(alpha), 
+            where=(alpha != 0.0)
+        )
+
+        # phi-phi
+        linear_matrix[0, 0, :, :, :] = 0.0
+
+        # phi-apar
+        linear_matrix[0, 1, :, :, :] = 1j * kz / one_minus_gamma0_over_alpha
+
+        # apar-phi
+        linear_matrix[1, 0, :, :, :] = 1j * kz * (
+            (1 + taubarinv) / (1 + kperp2 * de**2)
+        )
+
+        # apar-apar
+        linear_matrix[1, 1, :, :, :] = 0.0
+
+        return linear_matrix
