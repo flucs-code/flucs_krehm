@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import cupy as cp
 import numpy as np
+from scipy.special import i0e
 from cupy.cuda import cufft
 from flucs.diagnostic import FlucsDiagnostic
 from flucs.solvers.fourier.fourier_system import FourierSystem
@@ -303,15 +304,13 @@ class KREHMFourier(FourierSystem):
     def finish_time_step(self) -> None:
         super().finish_time_step()
 
-
     def compute_linear_matrix_reference(self) -> np.ndarray:
-
         # Initialise linear matrix
         linear_matrix = np.zeros(
             (
-            self.number_of_fields, 
-            self.number_of_fields, 
-            *self.half_unpadded_tuple
+                self.number_of_fields,
+                self.number_of_fields,
+                *self.half_unpadded_tuple
             ),
             dtype=self.complex,
         )
@@ -322,18 +321,17 @@ class KREHMFourier(FourierSystem):
 
         # Get parameters
         rhoi = self.rhoi
-        rhos = self.rhos
         de = self.de
         ZTe_over_Ti = self.ZTe_over_Ti
 
         # Construct useful functions
         alpha = 0.5 * (kperp2) * (rhoi**2)
-        gamma0 = np.i0(alpha) * np.exp(-alpha)
+        gamma0 = i0e(alpha)
         taubarinv = ZTe_over_Ti * (1.0 - gamma0)
         one_minus_gamma0_over_alpha = np.divide(
-            1.0 - gamma0, 
-            alpha, 
-            out=np.ones_like(alpha), 
+            1.0 - gamma0,
+            alpha,
+            out=np.ones_like(alpha),
             where=(alpha != 0.0)
         )
 
