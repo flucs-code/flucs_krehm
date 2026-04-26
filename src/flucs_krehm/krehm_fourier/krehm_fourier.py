@@ -20,6 +20,7 @@ from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
 class KREHMFourier(FourierSystem):
     """Fourier solver for the isothermal KREHM system."""
     number_of_fields = 2
+    number_of_fields_nonlinear = 2
 
     # DFT plans
     plan_r2c: cufft.PlanNd
@@ -109,9 +110,16 @@ class KREHMFourier(FourierSystem):
             # time step + terms from the past 2 time steps (since we will be
             # using AB3)
             # The nonlinear terms are indexed as (step, field, kz, kx, ky)
-            self.multistep_nonlinear_terms = cp.zeros((3, 2, self.nz, self.nx,
-                                                       self.half_ny),
-                                                      dtype=self.complex)
+            self.multistep_nonlinear_terms = cp.zeros(
+                (
+                3,
+                self.number_of_fields_nonlinear, 
+                self.nz, 
+                self.nx, 
+                self.half_ny
+                 ),
+                dtype=self.complex
+            )
 
             # All fields and derivatives to be transformed to real space
             # The first index indexes the fields and it's meaning is
