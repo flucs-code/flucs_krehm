@@ -1,0 +1,25 @@
+[project]
+name = "flucs_krehm"
+description = "A collection of flucs systems for solving the KREHM equations."
+authors = [
+    {name = "P. G. Ivanov"}, 
+    {name = "T. Adkins"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["flucs"]
+dynamic = ["version"]
+
+[build-system]
+requires = ["setuptools", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+write_to = "src/flucs_krehm/_version.py"   # create this at build/install time
+fallback_version = "0.0"    
+
+[project.entry-points."flucs.systems"]
+KREHMFourier = "flucs_krehm.krehm_fourier.krehm_fourier:KREHMFourier"
