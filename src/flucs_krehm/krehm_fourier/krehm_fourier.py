@@ -1,7 +1,7 @@
-"""Pseudospectral Fourier implementation of the Ivanov et al. (2020) 2D fluid
-ITG system. The nonlinear term is handled explicitly using the Adams-Bashforth
-3-step method.
-
+"""
+Pseudospectral Fourier implementation of the isothermal KREHM system from
+Adkins et al. (2024). The nonlinear term is handled explicitly using the 
+Adams-Bashforth 3-step method.
 """
 from typing import ClassVar
 
@@ -24,42 +24,21 @@ class KREHMFourier(FourierSystem):
     number_of_dft_derivatives = 6
     number_of_dft_bits = 5
 
-    # DFT plans
-    plan_r2c: cufft.PlanNd
-    plan_c2r: cufft.PlanNd
-
-    # CUDA grids
-    nonlinear_bits_shared_mem: int
-
-    # CUDA kernels
-    find_derivatives_kernel: cp.RawKernel
-    find_nonlinear_bits_kernel: cp.RawKernel
-
-    # CUDA memory
-
     # Direct pointers to fields
     phi: list[cp.ndarray]
     apar: list[cp.ndarray]
 
-    # Nonlinear terms with multistep history
-    multistep_nonlinear_terms: cp.ndarray
+    # CUDA grids and kernels
+    nonlinear_bits_shared_mem: int
 
-    # Derivatives and 'bits' used for finding the nonlinear terms
-    dft_derivatives_and_bits: cp.ndarray
-    real_derivatives_and_bits: cp.ndarray
-
-    # Single-element array for the current CFL rate
-    cfl_rate: cp.ndarray
+    find_derivatives_kernel: cp.RawKernel
+    find_nonlinear_bits_kernel: cp.RawKernel
 
     # Supported diagnostics
     diags: ClassVar[set[type[FlucsDiagnostic]]] = {
         FreeEnergyDiag,
         HelicityDiag
     }
-
-    def _setup_system(self):
-        """Prepares the system for the solver."""
-        super()._setup_system()
 
     def ready(self):
         # Anything system-specific goes here
