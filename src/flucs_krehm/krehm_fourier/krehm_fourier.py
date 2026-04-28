@@ -21,6 +21,8 @@ class KREHMFourier(FourierSystem):
     """Fourier solver for the isothermal KREHM system."""
     number_of_fields = 2
     number_of_fields_nonlinear = 2
+    number_of_dft_derivatives = 6
+    number_of_dft_bits = 5
 
     # DFT plans
     plan_r2c: cufft.PlanNd
@@ -57,8 +59,6 @@ class KREHMFourier(FourierSystem):
 
     def _setup_system(self):
         """Prepares the system for the solver."""
-
-        self.allocate_memory()
         super()._setup_system()
 
     def ready(self):
@@ -76,17 +76,17 @@ class KREHMFourier(FourierSystem):
 
         super().ready()
 
-    def allocate_memory(self):
-        # GPU arrays
+    def _allocate_memory(self):
+        """Allocates runtime arrays."""
 
-        # For the field arrays, we need to keep the fields
-        # at the current time step and the previous one.
+        # First, call FourierSystem's method which allocates
+        # self.fields among other things.
+        super()._allocate_memory(
+            allocate_derivatives_and_bits=True,
+            combine_derivatives_and_bits=True
+        )
 
-        self.fields = [cp.zeros((2, self.nz, self.nx, self.half_ny),
-                                dtype=self.complex),
-                       cp.zeros((2, self.nz, self.nx, self.half_ny),
-                                dtype=self.complex)]
-
+        # Pointers to phi and apar for easier access
         self.phi = [cp.ndarray((self.nz, self.nx, self.half_ny),
                                dtype=self.complex,
                                memptr=self.fields[0][0, 0, 0, 0].data),
@@ -101,93 +101,29 @@ class KREHMFourier(FourierSystem):
                              dtype=self.complex,
                              memptr=self.fields[1][1, 0, 0, 0].data),]
 
-        # when running linearly, need something to pass to the kernels
-        # this is unused
-        self.dft_bits = cp.zeros(1, dtype=self.complex)
+        # All fields and derivatives to be transformed to real space
+        # are kept in one huge array (dft_derivatives).
+        # The first index indexes the fields and it's meaning is
+        # 0: dxphi
+        # 1: dyphi,
+        # 2: dxapar
+        # 3: dyapar
+        # 4: one_minus_gamma0_over_alpha kperp2 phi
+        # 5: kperp2apar
 
-        if not self.input["setup.linear"]:
-            # For the nonlinear terms, we need to keep terms at the current
-            # time step + terms from the past 2 time steps (since we will be
-            # using AB3)
-            # The nonlinear terms are indexed as (step, field, kz, kx, ky)
-            self.multistep_nonlinear_terms = cp.zeros(
-                (
-                3,
-                self.number_of_fields_nonlinear, 
-                self.nz, 
-                self.nx, 
-                self.half_ny
-                 ),
-                dtype=self.complex
-            )
+        # The NL bits here are
+        # 0: dxphi * one_minus_gamma0_over_alpha * kperp2 * phi 
+        #   - dxapar * kperp2apar
+        # 1: dyphi * one_minus_gamma0_over_alpha * kperp2 * phi 
+        #   - dyapar * kperp2apar
+        # 2: de2 * dxphi * kperp2 * apar
+        #   - 0.5 (Z/tau) rhoi2 * dxapar * (1-Gamma0)/alpha * kperp2 * phi
+        # 3: de2 * dyphi * kperp2 * apar
+        #   - 0.5 (Z/tau) rhoi2 * dyapar * (1-Gamma0)/alpha * kperp2 * phi
+        # 4: dxphi * dyapar - dyphi * dxapar
 
-            # All fields and derivatives to be transformed to real space
-            # The first index indexes the fields and it's meaning is
-            # 0: dxphi
-            # 1: dyphi,
-            # 2: dxapar
-            # 3: dyapar
-            # 4: one_minus_gamma0_over_alpha kperp2 phi
-            # 5: kperp2apar
-            self.dft_derivatives_and_bits = cp.zeros([6,
-                                                      self.padded_nz,
-                                                      self.padded_nx,
-                                                      self.half_padded_ny],
-                                                     dtype=self.complex)
-
-            self.real_derivatives_and_bits = cp.zeros([6,
-                                                       self.padded_nz,
-                                                       self.padded_nx,
-                                                       self.padded_ny],
-                                                      dtype=self.float)
-
-            # The above memory is reused for the NL bits.
-            # These 'NL bits' are the terms which are calculated in real space.
-            # They are transformed back to Fourier space, where any additional
-            # derivatives are taken by multiplying the NL bits by the
-            # appropriate powers of k. The NL bits here are
-            # 0: dxphi * one_minus_gamma0_over_alpha * kperp2 * phi 
-            #   - dxapar * kperp2apar
-            # 1: dyphi * one_minus_gamma0_over_alpha * kperp2 * phi 
-            #   - dyapar * kperp2apar
-            # 2: de2 * dxphi * kperp2 * apar
-            #   - 0.5 (Z/tau) rhoi2 * dxapar * (1-Gamma0)/alpha * kperp2 * phi
-            # 3: de2 * dyphi * kperp2 * apar
-            #   - 0.5 (Z/tau) rhoi2 * dyapar * (1-Gamma0)/alpha * kperp2 * phi
-            # 4: dxphi * dyapar - dyphi * dxapar
-
-            # Still need dft_bits as FourierSystem expects it
-            self.dft_bits = self.dft_derivatives_and_bits
-
-            self.cfl_rate = cp.zeros([1], dtype=self.float)
-
-            self.plan_c2r = cufft.PlanNd(
-                shape=tuple([self.padded_nz, self.padded_nx, self.padded_ny]),
-                istride=1,
-                ostride=1,
-                inembed=tuple([1, self.padded_nx, self.half_padded_ny]),
-                onembed=tuple([1, self.padded_nx, self.padded_ny]),
-                idist=self.padded_nz*self.padded_nx*self.half_padded_ny,
-                odist=self.padded_nz*self.padded_nx*self.padded_ny,
-                fft_type=self.fft_c2r_plan_type,
-                batch=6,
-                order='C',
-                last_axis=3,
-                last_size=self.padded_ny)
-
-            self.plan_r2c = cufft.PlanNd(
-                shape=tuple([self.padded_nz, self.padded_nx, self.padded_ny]),
-                istride=1,
-                ostride=1,
-                inembed=tuple([1, self.padded_nx, self.padded_ny]),
-                onembed=tuple([1, self.padded_nx, self.half_padded_ny]),
-                idist=self.padded_nz*self.padded_nx*self.padded_ny,
-                odist=self.padded_nz*self.padded_nx*self.half_padded_ny,
-                fft_type=self.fft_r2c_plan_type,
-                batch=5,
-                order='C',
-                last_axis=3,
-                last_size=self.half_padded_ny)
+        # The arrays for the above are handled by FourierSystem.
+        # There are no system-specific arrays that we need to allocate here 
 
     def _interpret_input(self):
         """Checks if the input file makes sense"""
@@ -288,23 +224,23 @@ class KREHMFourier(FourierSystem):
         self.find_derivatives_kernel((self.half_padded_cuda_grid_size,),
                                      (self.cuda_block_size,),
                                      (self.fields[self.current_step % 2 - 1],
-                                      self.dft_derivatives_and_bits,
+                                      self.dft_derivatives,
                                       self.cfl_rate))
 
-        self.plan_c2r.fft(self.dft_derivatives_and_bits,
-                          self.real_derivatives_and_bits,
+        self.plan_derivatives_c2r.fft(self.dft_derivatives,
+                          self.real_derivatives,
                           cufft.CUFFT_INVERSE)
 
         self.find_nonlinear_bits_kernel(
             (self.full_padded_cuda_grid_size,),
             (self.cuda_block_size,),
-            (self.real_derivatives_and_bits,
+            (self.real_derivatives,
              self.cfl_rate),
             shared_mem=self.nonlinear_bits_shared_mem
         )
 
-        self.plan_r2c.fft(self.real_derivatives_and_bits,
-                          self.dft_derivatives_and_bits,
+        self.plan_bits_r2c.fft(self.real_derivatives,
+                          self.dft_derivatives,
                           cufft.CUFFT_FORWARD)
 
         super().calculate_nonlinear_terms()
