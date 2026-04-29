@@ -167,42 +167,43 @@ __global__ void find_nonlinear_bits(FLUCS_FLOAT* real_derivatives_and_bits,
     real_derivatives_and_bits[real_index + 4*PADDEDSIZE] = dxphi * dyapar - dyphi * dxapar;
 }
 
-__device__ void add_nonlinear_terms(const size_t index,
-                                    const FLUCS_FLOAT dt,
-                                    const long long current_step,
-                                    const FLUCS_FLOAT AB0,
-                                    const FLUCS_FLOAT AB1,
-                                    const FLUCS_FLOAT AB2,
+__device__ void get_nonlinear_terms(const size_t index,
                                     const FLUCS_COMPLEX* dft_bits,
-                                    FLUCS_COMPLEX* rhs_fields){
+                                    FLUCS_COMPLEX* nonlinear_terms){
 
+    // Indices
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
     const size_t ikx = indices.ikx;
     const size_t iky = indices.iky;
     const size_t ikz = indices.ikz;
 
+    // Initialise nonlinear terms
+    nonlinear_terms[0] = FLUCS_COMPLEX(0, 0);
+    nonlinear_terms[1] = FLUCS_COMPLEX(0, 0);
+
     // Ignore kperp2 = 0 modes
     if (ikx == 0 && iky == 0)
         return;
 
+    // Wavenumbers and indices 
     const FLUCS_FLOAT kx = kx_from_ikx(ikx);
     const FLUCS_FLOAT ky = ky_from_iky(iky);
 
     const size_t padded_ikx = padded_ikx_from_ikx(ikx);
     const size_t padded_ikz = padded_ikz_from_ikz(ikz);
-
     const size_t padded_index = index_from_3d<PADDED_NZ, PADDED_NX, HALF_PADDED_NY>(padded_ikz, padded_ikx, iky);
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
     
-    const FLUCS_COMPLEX phi_nonlinearity = DFT_PADDEDSIZE_FACTOR * (
+    // Calculate nonnlinear terms
+    nonlinear_terms[0] = DFT_PADDEDSIZE_FACTOR * (
         + FLUCS_COMPLEX(-ky * dft_bits[padded_index].imag(),
                          ky * dft_bits[padded_index].real())
         - FLUCS_COMPLEX(-kx * dft_bits[padded_index + HALFPADDEDSIZE].imag(),
                          kx * dft_bits[padded_index + HALFPADDEDSIZE].real())
     ) / (one_minus_gamma0_over_alpha(kperp2) * kperp2);
 
-    const FLUCS_COMPLEX apar_nonlinearity = DFT_PADDEDSIZE_FACTOR * (
+    nonlinear_terms[1] = DFT_PADDEDSIZE_FACTOR * (
         + dft_bits[padded_index + 4*HALFPADDEDSIZE]
         + FLUCS_COMPLEX(-ky * dft_bits[padded_index + 2*HALFPADDEDSIZE].imag(),
                          ky * dft_bits[padded_index + 2*HALFPADDEDSIZE].real())
@@ -210,23 +211,11 @@ __device__ void add_nonlinear_terms(const size_t index,
                          kx * dft_bits[padded_index + 3*HALFPADDEDSIZE].real())
     ) / (FLOAT_ONE + kperp2*DE2);
 
-    const size_t multistep_index_0 = ((current_step      % 3 + 3) % 3) * 2 * HALFUNPADDEDSIZE + index;
-    const size_t multistep_index_1 = ((current_step + 2) % 3)          * 2 * HALFUNPADDEDSIZE + index;
-    const size_t multistep_index_2 = ((current_step + 1) % 3)          * 2 * HALFUNPADDEDSIZE + index;
+}
 
-    // phi
-    rhs_fields[0] -= dt * (+AB0*phi_nonlinearity
-                           +AB1*multistep_nonlinear_terms[multistep_index_1]
-                           +AB2*multistep_nonlinear_terms[multistep_index_2]);
-
-    multistep_nonlinear_terms[multistep_index_0] = phi_nonlinearity;
-
-    // apar
-    rhs_fields[1] -= dt * (+AB0*apar_nonlinearity
-                           +AB1*multistep_nonlinear_terms[multistep_index_1 + HALFUNPADDEDSIZE]
-                           +AB2*multistep_nonlinear_terms[multistep_index_2 + HALFUNPADDEDSIZE]);
-
-    multistep_nonlinear_terms[multistep_index_0 + HALFUNPADDEDSIZE] = apar_nonlinearity;
+__device__ __forceinline__
+int nonlinear_term_field_index(const int term_index) {
+    return term_index; // Trivial indexing in this case
 }
 
 struct FreeEnergy_Functor {
