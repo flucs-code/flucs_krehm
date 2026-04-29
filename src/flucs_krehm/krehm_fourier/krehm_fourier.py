@@ -210,6 +210,7 @@ class KREHMFourier(FourierSystem):
                           self.real_derivatives,
                           cufft.CUFFT_INVERSE)
 
+        # NB: real_derivatives and real_bits are the same array
         self.find_nonlinear_bits_kernel(
             (self.full_padded_cuda_grid_size,),
             (self.cuda_block_size,),
@@ -218,9 +219,8 @@ class KREHMFourier(FourierSystem):
             shared_mem=self.nonlinear_bits_shared_mem
         )
 
-        self.plan_bits_r2c.fft(self.real_derivatives,
-                          self.dft_derivatives,
-                          cufft.CUFFT_FORWARD)
+        # NB: real_derivatives and real_bits are the same array
+        self.plan_bits_r2c.fft(self.real_bits, self.dft_bits, cufft.CUFFT_FORWARD)
 
         super().calculate_nonlinear_terms()
 
