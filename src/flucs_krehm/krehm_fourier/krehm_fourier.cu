@@ -11,7 +11,11 @@ extern "C" {
 // Array for AB3 nonlinear terms
 __constant__ FLUCS_COMPLEX* multistep_nonlinear_terms = NULL;
 
-__device__ void get_linear_matrix(const size_t index, const FLUCS_FLOAT dt, FLUCS_COMPLEX matrix[2][2]){
+__device__ void get_linear_matrix(
+    const size_t index, 
+    const FLUCS_FLOAT dt, 
+    FLUCS_COMPLEX matrix[2][2]
+){
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
     const size_t ikx = indices.ikx;
     const size_t iky = indices.iky;
@@ -31,9 +35,11 @@ __device__ void get_linear_matrix(const size_t index, const FLUCS_FLOAT dt, FLUC
 }
 
 
-__global__ void find_derivatives(const FLUCS_COMPLEX* fields,
-                                 FLUCS_COMPLEX* dft_derivatives,
-                                 FLUCS_FLOAT* cfl_rate){
+__global__ void find_derivatives(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_COMPLEX* dft_derivatives,
+    FLUCS_FLOAT* cfl_rate
+){
     const size_t padded_index = blockDim.x * blockIdx.x + threadIdx.x;
 
     // Check if we are within bounds
@@ -104,8 +110,10 @@ __global__ void find_derivatives(const FLUCS_COMPLEX* fields,
 }
 
 
-__global__ void find_nonlinear_bits(FLUCS_FLOAT* real_derivatives_and_bits,
-                                    FLUCS_FLOAT* cfl_rate){
+__global__ void find_nonlinear_bits(
+    FLUCS_FLOAT* real_derivatives_and_bits,
+    FLUCS_FLOAT* cfl_rate
+){
     // Shared memory for CFL calculations
     extern __shared__ FLUCS_FLOAT cfl_shared[];
 
@@ -167,10 +175,11 @@ __global__ void find_nonlinear_bits(FLUCS_FLOAT* real_derivatives_and_bits,
     real_derivatives_and_bits[real_index + 4*PADDEDSIZE] = dxphi * dyapar - dyphi * dxapar;
 }
 
-__device__ void get_nonlinear_terms(const size_t index,
-                                    const FLUCS_COMPLEX* dft_bits,
-                                    FLUCS_COMPLEX* nonlinear_terms){
-
+__device__ void get_nonlinear_terms(
+    const size_t index,
+    const FLUCS_COMPLEX* dft_bits,
+    FLUCS_COMPLEX* nonlinear_terms
+){
     // Indices
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
     const size_t ikx = indices.ikx;
@@ -216,6 +225,60 @@ __device__ void get_nonlinear_terms(const size_t index,
 __device__ __forceinline__
 int nonlinear_term_field_index(const int term_index) {
     return term_index; // Trivial indexing in this case
+}
+
+// Phase velocity (normalised to the Alfven speed)
+// Note that we supply one_minus_gamma0_over_alpha as an argument to avoid 
+// duplicating calls to this in order locations. 
+__device__ __forceinline__
+FLUCS_FLOAT get_phase_velocity(
+    const FLUCS_FLOAT kperp2,
+    const FLUCS_FLOAT one_minus_gamma0_over_alpha
+){
+    const FLUCS_FLOAT alpha = ((FLUCS_FLOAT)0.5) * RHOI2 * kperp2;
+
+    return sqrt(
+        (ZTE_OVER_TI * alpha + FLOAT_ONE/one_minus_gamma0_over_alpha)
+        /((FLOAT_ONE + DE2 * kperp2))
+    );
+}
+
+// Generalised Elsasser potentials
+// Note that we adopt the sign convention that the "plus" field propagates in 
+// the positive z direction, which is the opposite convention to that used in, 
+// e.g., Adkins et al. (2024). 
+__device__ __forceinline__
+void get_thetas_from_fields(
+    const size_t index,
+    const FLUCS_COMPLEX* fields,
+    FLUCS_COMPLEX& thetap,
+    FLUCS_COMPLEX& thetam
+){
+    // Indices
+    indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+    const size_t ikx = indices.ikx;
+    const size_t iky = indices.iky;
+
+    // Wavenumbers 
+    const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+    const FLUCS_FLOAT ky = ky_from_iky(iky);
+
+    const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+    // Fields
+    const FLUCS_COMPLEX phi = fields[index];
+    const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+
+    // Useful intermediate quantities
+    const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
+    const FLUCS_FLOAT vph = get_phase_velocity(kperp2, gamma_factor);
+
+    // Construct Elsasser potentials
+    const FLUCS_FLOAT phi_factor = vph * gamma_factor;
+    const FLUCS_FLOAT prefactor = sqrt(FLOAT_ONE + kperp2 * DE2);
+
+    thetap = prefactor * (phi_factor * phi + apar);
+    thetam = prefactor * (phi_factor * phi - apar);
 }
 
 struct FreeEnergy_Functor {
