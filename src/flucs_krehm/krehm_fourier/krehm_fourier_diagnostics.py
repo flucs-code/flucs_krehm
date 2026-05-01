@@ -20,46 +20,37 @@ class FreeEnergyDiag(FlucsDiagnostic):
 
     name = "free_energy"
     system: KREHMFourier
-    option_defaults: ClassVar[dict[str, object]] = {}
+    option_defaults: ClassVar[dict[str, object]] = {
+        "save_thetas": False
+    }
 
     # Temporary arrays and kernels
     temp_zx: cp.ndarray
     temp_z: cp.ndarray
     result: cp.ndarray
 
-    dW_kzkx_kernel: cp.RawKernel
-    free_energy_kzkx_kernel: cp.RawKernel
+    # General reduction kernels
     real_last_axis_sum_nx_kernel: cp.RawKernel
     real_last_axis_sum_nz_kernel: cp.RawKernel
-    hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
 
-    # Hyperdissipation components to compute
+    # Free energy kernels
+    free_energy_kzkx_kernel: cp.RawKernel
+    dWdt_kzkx_kernel: cp.RawKernel
+    dWdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
+
     hyperdissipation_components: ClassVar[tuple[str, ...]] = (
         "perp", "kx", "ky", "kz"
     )
 
     def init_vars(self) -> None:
         # Add variables for free energy and its time derivative
-        self.add_var(FlucsDiagnosticVariable(
-            name="W",
-            shape=(),
-            dimensions={},
-            is_complex=False
-        ))
-
-        self.add_var(FlucsDiagnosticVariable(
-            name="dWdt",
-            shape=(),
-            dimensions={},
-            is_complex=False
-        ))
-
-        self.add_var(FlucsDiagnosticVariable(
-            name="dWdt_error",
-            shape=(),
-            dimensions={},
-            is_complex=False
-        ))
+        for name in ["W", "dWdt", "dWdt_error"]:
+             self.add_var(FlucsDiagnosticVariable(
+                name=name,
+                shape=(),
+                dimensions={},
+                is_complex=False
+            ))
 
         # Add variables for hyperdissipation components
         for component in self.hyperdissipation_components:
@@ -70,26 +61,59 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 is_complex=False
             ))
 
+        # Add theta diagnostics
+        if self.save_thetas:
+
+            for name in ["Wp", "Wm", "dWpdt", "dWmdt"]:
+                 self.add_var(FlucsDiagnosticVariable(
+                    name=name,
+                    shape=(),
+                    dimensions={},
+                    is_complex=False
+                ))
+
+            for component in self.hyperdissipation_components:
+                self.add_var(FlucsDiagnosticVariable(
+                    name=f"dWpdt_hyperdissipation_{component}",
+                    shape=(),
+                    dimensions={},
+                    is_complex=False
+                ))
+                self.add_var(FlucsDiagnosticVariable(
+                    name=f"dWmdt_hyperdissipation_{component}",
+                    shape=(),
+                    dimensions={},
+                    is_complex=False
+                ))
+
 
     def ready(self) -> None:
         # Allocate temporary memory
         self.temp_zx = cp.zeros(
-            self.system.nz * self.system.nx, dtype=self.system.complex
+            self.system.nz * self.system.nx, dtype=self.system.float
         )
-
-        self.temp_z = cp.zeros(self.system.nz, dtype=self.system.complex)
-
+        self.temp_z = cp.zeros(self.system.nz, dtype=self.system.float)
         self.result = cp.zeros((1,), dtype=self.system.float)
 
-        # Get kernels
-        self.dW_kzkx_kernel = self.system.cupy_module.get_function("dW_kzkx")
-        self.free_energy_kzkx_kernel = self.system.cupy_module.get_function("free_energy_kzkx")
-        self.real_last_axis_sum_nx_kernel = self.system.cupy_module.get_function("real_last_axis_sum_nx")
-        self.real_last_axis_sum_nz_kernel = self.system.cupy_module.get_function("real_last_axis_sum_nz")
+        # General reduction kernels
+        self.real_last_axis_sum_nx_kernel = (
+            self.system.cupy_module.get_function("real_last_axis_sum_nx")
+        )
+        self.real_last_axis_sum_nz_kernel = (
+            self.system.cupy_module.get_function("real_last_axis_sum_nz")
+        )
 
-        self.hyperdissipation_magnitude_kernels = {
+        # Free energy kernels
+        self.free_energy_kzkx_kernel = (
+            self.system.cupy_module.get_function("free_energy_kzkx")
+        )
+        self.dWdt_kzkx_kernel = (
+            self.system.cupy_module.get_function("dWdt_kzkx")
+        )
+
+        self.dWdt_hyperdissipation_magnitude_kernels = {
             component: self.system.cupy_module.get_function(
-                f"W_hyperdissipation_{component}_kzkx"
+                f"dWdt_hyperdissipation_{component}_kzkx"
             )
             for component in self.hyperdissipation_components
         }
@@ -126,10 +150,10 @@ class FreeEnergyDiag(FlucsDiagnostic):
         self.save_data("W", self.result.get().item())
 
         # dW/dt
-        self.dW_kzkx_kernel(
+        self.dWdt_kzkx_kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
-                (fields, fields_prev, self.temp_zx),
+                (fields, fields_prev, current_dt, self.temp_zx),
                 shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
 
         self.real_last_axis_sum_nx_kernel(
@@ -144,12 +168,12 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 (self.temp_z, self.result),
                 shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
 
-        dWdt = self.result.get().item() / current_dt
+        dWdt = self.result.get().item()
         self.save_data("dWdt", dWdt)
 
         # Hyperdissipation
         dWdt_hyperdissipation_total = 0.0
-        for component, kernel in self.hyperdissipation_magnitude_kernels.items():
+        for component, kernel in self.dWdt_hyperdissipation_magnitude_kernels.items():
             kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
@@ -188,40 +212,43 @@ class HelicityDiag(FlucsDiagnostic):
 
     name = "helicity"
     system: KREHMFourier
-    option_defaults: ClassVar[dict[str, object]] = {}
+    option_defaults: ClassVar[dict[str, object]] = {
+        "save_thetas": False
+    }
 
     # Temporary arrays and kernels
     temp_zx: cp.ndarray
     temp_z: cp.ndarray
     result: cp.ndarray
 
-    dH_kzkx_kernel: cp.RawKernel
-    helicity_kzkx_kernel: cp.RawKernel
+    # General reduction kernels
     real_last_axis_sum_nx_kernel: cp.RawKernel
     real_last_axis_sum_nz_kernel: cp.RawKernel
-    hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
 
-    # Hyperdissipation components to compute
+    # Helicity kernels
+    helicity_kzkx_kernel: cp.RawKernel
+    dHdt_kzkx_kernel: cp.RawKernel
+    dHdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
+
     hyperdissipation_components: ClassVar[tuple[str, ...]] = (
         "perp", "kx", "ky", "kz"
     )
 
     def init_vars(self) -> None:
         # Add variables for helicity and its time derivative
+
         self.add_var(FlucsDiagnosticVariable(
             name="H",
             shape=(),
             dimensions={},
             is_complex=False
         ))
-
         self.add_var(FlucsDiagnosticVariable(
             name="dHdt",
             shape=(),
             dimensions={},
             is_complex=False
         ))
-
         self.add_var(FlucsDiagnosticVariable(
             name="dHdt_error",
             shape=(),
@@ -238,32 +265,74 @@ class HelicityDiag(FlucsDiagnostic):
                 is_complex=False
             ))
 
+        # Add theta diagnostics
+        if self.save_thetas:
+            self.add_var(FlucsDiagnosticVariable(
+                name="Hp",
+                shape=(),
+                dimensions={},
+                is_complex=False
+            ))
+            self.add_var(FlucsDiagnosticVariable(
+                name="Hm",
+                shape=(),
+                dimensions={},
+                is_complex=False
+            ))
+            self.add_var(FlucsDiagnosticVariable(
+                name="dHpdt",
+                shape=(),
+                dimensions={},
+                is_complex=False
+            ))
+            self.add_var(FlucsDiagnosticVariable(
+                name="dHmdt",
+                shape=(),
+                dimensions={},
+                is_complex=False
+            ))
+
+            for component in self.hyperdissipation_components:
+                self.add_var(FlucsDiagnosticVariable(
+                    name=f"dHpdt_hyperdissipation_{component}",
+                    shape=(),
+                    dimensions={},
+                    is_complex=False
+                ))
+                self.add_var(FlucsDiagnosticVariable(
+                    name=f"dHmdt_hyperdissipation_{component}",
+                    shape=(),
+                    dimensions={},
+                    is_complex=False
+                ))
+
     def ready(self) -> None:
         # Allocate temporary memory
         self.temp_zx = cp.zeros(
-            self.system.nz * self.system.nx,
-            dtype=self.system.float
+            self.system.nz * self.system.nx, dtype=self.system.float
         )
-
         self.temp_z = cp.zeros(self.system.nz, dtype=self.system.float)
-
         self.result = cp.zeros((1,), dtype=self.system.float)
 
-        # Get kernels
-        self.helicity_kzkx_kernel = self.system.cupy_module.get_function(
-            "helicity_kzkx"
+        # General reduction kernels
+        self.real_last_axis_sum_nx_kernel = (
+            self.system.cupy_module.get_function("real_last_axis_sum_nx")
         )
-        self.dH_kzkx_kernel = self.system.cupy_module.get_function("dH_kzkx")
-        self.real_last_axis_sum_nx_kernel = self.system.cupy_module.get_function(
-            "real_last_axis_sum_nx"
-        )
-        self.real_last_axis_sum_nz_kernel = self.system.cupy_module.get_function(
-            "real_last_axis_sum_nz"
+        self.real_last_axis_sum_nz_kernel = (
+            self.system.cupy_module.get_function("real_last_axis_sum_nz")
         )
 
-        self.hyperdissipation_magnitude_kernels = {
+        # Helicity kernels
+        self.helicity_kzkx_kernel = (
+            self.system.cupy_module.get_function("helicity_kzkx")
+        )
+        self.dHdt_kzkx_kernel = (
+            self.system.cupy_module.get_function("dHdt_kzkx")
+        )
+
+        self.dHdt_hyperdissipation_magnitude_kernels = {
             component: self.system.cupy_module.get_function(
-                f"H_hyperdissipation_{component}_kzkx"
+                f"dHdt_hyperdissipation_{component}_kzkx"
             )
             for component in self.hyperdissipation_components
         }
@@ -303,10 +372,10 @@ class HelicityDiag(FlucsDiagnostic):
         self.save_data("H", self.result.get().item())
 
         # dHdt
-        self.dH_kzkx_kernel(
+        self.dHdt_kzkx_kernel(
             (self.system.nx * self.system.nz,),
             (BLOCK_SIZE,),
-            (fields, fields_prev, self.temp_zx),
+            (fields, fields_prev, current_dt, self.temp_zx),
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
 
@@ -324,12 +393,12 @@ class HelicityDiag(FlucsDiagnostic):
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
 
-        dHdt = self.result.get().item() / current_dt
+        dHdt = self.result.get().item() 
         self.save_data("dHdt", dHdt)
 
         # Hyperdissipation
         dHdt_hyperdissipation_total = 0.0
-        for component, kernel in self.hyperdissipation_magnitude_kernels.items():
+        for component, kernel in self.dHdt_hyperdissipation_magnitude_kernels.items():
             kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
