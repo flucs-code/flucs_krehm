@@ -8,9 +8,14 @@
 
 extern "C" {
 
+////////////////////////////////////////////////////////////////////////////////
+// Core solver functions
+////////////////////////////////////////////////////////////////////////////////
+
 // Array for AB3 nonlinear terms
 __constant__ FLUCS_COMPLEX* multistep_nonlinear_terms = NULL;
 
+// Fetches the linear matrix for a given mode
 __device__ void get_linear_matrix(
     const size_t index, 
     const FLUCS_FLOAT dt, 
@@ -34,7 +39,8 @@ __device__ void get_linear_matrix(
     matrix[1][1] = FLUCS_COMPLEX(0, 0);
 }
 
-
+// Finds the derivatives (in Fourier space) required to construct the nonlinear
+// terms entering through the poisson brackets
 __global__ void find_derivatives(
     const FLUCS_COMPLEX* fields,
     FLUCS_COMPLEX* dft_derivatives,
@@ -109,7 +115,8 @@ __global__ void find_derivatives(
 
 }
 
-
+// Finds the nonlinear combinations of (real-space) derivatives required to 
+// construct the nonlinear terms
 __global__ void find_nonlinear_bits(
     FLUCS_FLOAT* real_derivatives_and_bits,
     FLUCS_FLOAT* cfl_rate
@@ -175,6 +182,7 @@ __global__ void find_nonlinear_bits(
     real_derivatives_and_bits[real_index + 4*PADDEDSIZE] = dxphi * dyapar - dyphi * dxapar;
 }
 
+// Returns the nonlinear terms for a given mode
 __device__ void get_nonlinear_terms(
     const size_t index,
     const FLUCS_COMPLEX* dft_bits,
@@ -222,10 +230,15 @@ __device__ void get_nonlinear_terms(
 
 }
 
+// Mapping of nonlinear terms to fields
 __device__ __forceinline__
 int nonlinear_term_field_index(const int term_index) {
     return term_index; // Trivial indexing in this case
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// General helper functions
+////////////////////////////////////////////////////////////////////////////////
 
 // Phase velocity (normalised to the Alfven speed)
 // Note that we supply one_minus_gamma0_over_alpha as an argument to avoid 
@@ -244,9 +257,9 @@ FLUCS_FLOAT get_phase_velocity(
 }
 
 // Generalised Elsasser potentials
-// Note that we adopt the sign convention that the "plus" field propagates in 
-// the positive z direction, which is the opposite convention to that used in, 
-// e.g., Adkins et al. (2024). 
+// Note that we adopt the sign convention that the "plus" field propagates in
+// the positive z direction, which is the opposite convention to that used in,
+// e.g., Adkins et al. (2024).
 __device__ __forceinline__
 void get_thetas_from_fields(
     const size_t index,
@@ -281,6 +294,10 @@ void get_thetas_from_fields(
     thetam = prefactor * (phi_factor * phi - apar);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Free Energy (W)
+////////////////////////////////////////////////////////////////////////////////
+
 struct FreeEnergy_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT multiplier;
@@ -309,8 +326,51 @@ struct FreeEnergy_Functor {
     }
 };
 
+struct FreeEnergyThetap_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT multiplier;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Thetas
+        FLUCS_COMPLEX thetap, thetam;
+        get_thetas_from_fields(index, fields, thetap, thetam);
+
+        return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
+            * (thetap.real()*thetap.real() + thetap.imag()*thetap.imag());
+    }
+};
+
+struct FreeEnergyThetam_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT multiplier;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Thetas
+        FLUCS_COMPLEX thetap, thetam;
+        get_thetas_from_fields(index, fields, thetap, thetam);
+
+        return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
+            * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag());
+    }
+};
+
+// W
 __global__
-void free_energy_kzkx(
+void W_kzkx(
     const FLUCS_COMPLEX* fields,
     FLUCS_FLOAT* output
 ){
@@ -323,6 +383,35 @@ void free_energy_kzkx(
 
 }
 
+__global__
+void Wp_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+){
+
+    add_and_sum_last_axis<HALF_NY, true>(
+            FLOAT_ONE,
+            output,
+            FreeEnergyThetap_Functor{fields, FLOAT_ONE}
+        );
+
+}
+
+__global__
+void Wm_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+){
+
+    add_and_sum_last_axis<HALF_NY, true>(
+            FLOAT_ONE,
+            output,
+            FreeEnergyThetam_Functor{fields, FLOAT_ONE}
+        );
+
+}
+
+// dWdt
 __global__
 void dWdt_kzkx(
     const FLUCS_COMPLEX* fields_now,
@@ -341,6 +430,41 @@ void dWdt_kzkx(
 }
 
 __global__
+void dWpdt_kzkx(
+    const FLUCS_COMPLEX* fields_now,
+    const FLUCS_COMPLEX* fields_prev,
+    const FLUCS_FLOAT dt, 
+    FLUCS_FLOAT* output
+){
+
+    add_and_sum_last_axis<HALF_NY, true>(
+            FLOAT_ONE / dt,
+            output,
+            FreeEnergyThetap_Functor{fields_now, FLOAT_ONE},
+            FreeEnergyThetap_Functor{fields_prev, -FLOAT_ONE}
+        );
+
+}
+
+__global__
+void dWmdt_kzkx(
+    const FLUCS_COMPLEX* fields_now,
+    const FLUCS_COMPLEX* fields_prev,
+    const FLUCS_FLOAT dt, 
+    FLUCS_FLOAT* output
+){
+
+    add_and_sum_last_axis<HALF_NY, true>(
+            FLOAT_ONE / dt,
+            output,
+            FreeEnergyThetam_Functor{fields_now, FLOAT_ONE},
+            FreeEnergyThetam_Functor{fields_prev, -FLOAT_ONE}
+        );
+
+}
+
+// dWdt_hyperdissipation_kx
+__global__
 void dWdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
     const FLUCS_FLOAT dt,
@@ -356,6 +480,38 @@ void dWdt_hyperdissipation_kx_kzkx(
 }
 
 __global__
+void dWpdt_hyperdissipation_kx_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKx_Functor<FreeEnergyThetap_Functor>{
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dWmdt_hyperdissipation_kx_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKx_Functor<FreeEnergyThetam_Functor>{
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+
+// dWdt_hyperdissipation_ky
+__global__
 void dWdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
     const FLUCS_FLOAT dt,
@@ -369,6 +525,39 @@ void dWdt_hyperdissipation_ky_kzkx(
         }
     );
 }
+
+__global__
+void dWpdt_hyperdissipation_ky_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKy_Functor<FreeEnergyThetap_Functor>{
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dWmdt_hyperdissipation_ky_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKy_Functor<FreeEnergyThetam_Functor>{
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+
+// dWdt_hyperdissipation_kz
 __global__
 void dWdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
@@ -383,6 +572,38 @@ void dWdt_hyperdissipation_kz_kzkx(
         }
     );
 }
+
+__global__
+void dWpdt_hyperdissipation_kz_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKz_Functor<FreeEnergyThetap_Functor>{
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dWmdt_hyperdissipation_kz_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKz_Functor<FreeEnergyThetam_Functor>{
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+// dWdt_hyperdissipation_perp
 __global__
 void dWdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
@@ -398,6 +619,39 @@ void dWdt_hyperdissipation_perp_kzkx(
     );
 }
 
+__global__
+void dWpdt_hyperdissipation_perp_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationPerp_Functor<FreeEnergyThetap_Functor>{
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dWmdt_hyperdissipation_perp_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationPerp_Functor<FreeEnergyThetam_Functor>{
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Helicity (H)
+////////////////////////////////////////////////////////////////////////////////
 
 struct Helicity_Functor {
     const FLUCS_COMPLEX* fields;
@@ -428,8 +682,61 @@ struct Helicity_Functor {
     }
 };
 
+struct HelicityThetap_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT multiplier;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Thetas
+        FLUCS_COMPLEX thetap, thetam;
+        get_thetas_from_fields(index, fields, thetap, thetam);
+
+        // Phase velocity
+        const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT vph = get_phase_velocity(kperp2, gamma_factor);
+
+        return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
+            * (thetap.real()*thetap.real() + thetap.imag()*thetap.imag())
+            / vph;
+    }
+};
+
+struct HelicityThetam_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT multiplier;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Thetas
+        FLUCS_COMPLEX thetap, thetam;
+        get_thetas_from_fields(index, fields, thetap, thetam);
+
+        // Phase velocity
+        const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT vph = get_phase_velocity(kperp2, gamma_factor);
+
+        return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
+            * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag())
+            / vph;
+    }
+};
+
+// H
 __global__
-void helicity_kzkx(
+void H_kzkx(
     const FLUCS_COMPLEX* fields,
     FLUCS_FLOAT* output
 ) {
@@ -440,6 +747,31 @@ void helicity_kzkx(
     );
 }
 
+__global__
+void Hp_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HelicityThetap_Functor{fields, FLOAT_ONE}
+    );
+}
+
+__global__
+void Hm_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HelicityThetam_Functor{fields, FLOAT_ONE}
+    );
+}
+
+// dHdt
 __global__
 void dHdt_kzkx(
     const FLUCS_COMPLEX* fields_now,
@@ -456,6 +788,37 @@ void dHdt_kzkx(
 }
 
 __global__
+void dHpdt_kzkx(
+    const FLUCS_COMPLEX* fields_now,
+    const FLUCS_COMPLEX* fields_prev,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE / dt,
+        output,
+        HelicityThetap_Functor{fields_now, FLOAT_ONE},
+        HelicityThetap_Functor{fields_prev, -FLOAT_ONE}
+    );
+}
+
+__global__
+void dHmdt_kzkx(
+    const FLUCS_COMPLEX* fields_now,
+    const FLUCS_COMPLEX* fields_prev,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE / dt,
+        output,
+        HelicityThetam_Functor{fields_now, FLOAT_ONE},
+        HelicityThetam_Functor{fields_prev, -FLOAT_ONE}
+    );
+}
+
+// dHdt_hyperdissipation_kx
+__global__
 void dHdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
     const FLUCS_FLOAT dt,
@@ -470,6 +833,37 @@ void dHdt_hyperdissipation_kx_kzkx(
     );
 }
 
+__global__
+void dHpdt_hyperdissipation_kx_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKx_Functor<HelicityThetap_Functor>{
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dHmdt_hyperdissipation_kx_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKx_Functor<HelicityThetam_Functor>{
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+// dHdt_hyperdissipation_ky
 __global__
 void dHdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
@@ -486,6 +880,37 @@ void dHdt_hyperdissipation_ky_kzkx(
 }
 
 __global__
+void dHpdt_hyperdissipation_ky_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKy_Functor<HelicityThetap_Functor>{
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dHmdt_hyperdissipation_ky_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKy_Functor<HelicityThetam_Functor>{
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+// dHdt_hyperdissipation_kz
+__global__
 void dHdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
     const FLUCS_FLOAT dt,
@@ -501,6 +926,37 @@ void dHdt_hyperdissipation_kz_kzkx(
 }
 
 __global__
+void dHpdt_hyperdissipation_kz_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKz_Functor<HelicityThetap_Functor>{
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dHmdt_hyperdissipation_kz_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationKz_Functor<HelicityThetam_Functor>{
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+// dHdt_hyperdissipation_perp
+__global__
 void dHdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
     const FLUCS_FLOAT dt,
@@ -511,6 +967,36 @@ void dHdt_hyperdissipation_perp_kzkx(
         output,
         HyperdissipationPerp_Functor<Helicity_Functor>{
             Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dHpdt_hyperdissipation_perp_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationPerp_Functor<HelicityThetap_Functor>{
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+        }
+    );
+}
+
+__global__
+void dHmdt_hyperdissipation_perp_kzkx(
+    const FLUCS_COMPLEX* fields,
+    const FLUCS_FLOAT dt,
+    FLUCS_FLOAT* output
+) {
+    add_and_sum_last_axis<HALF_NY, true>(
+        FLOAT_ONE,
+        output,
+        HyperdissipationPerp_Functor<HelicityThetam_Functor>{
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
         }
     );
 }

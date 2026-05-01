@@ -34,10 +34,21 @@ class FreeEnergyDiag(FlucsDiagnostic):
     real_last_axis_sum_nz_kernel: cp.RawKernel
 
     # Free energy kernels
-    free_energy_kzkx_kernel: cp.RawKernel
+    W_kzkx_kernel: cp.RawKernel
     dWdt_kzkx_kernel: cp.RawKernel
     dWdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
 
+    # Thetap kernels
+    Wp_kzkx_kernel: cp.RawKernel
+    dWpdt_kzkx_kernel: cp.RawKernel
+    dWpdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
+
+    # Thetam kernels
+    Wm_kzkx_kernel: cp.RawKernel
+    dWmdt_kzkx_kernel: cp.RawKernel
+    dWmdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
+
+    # Components of hyperdissipation
     hyperdissipation_components: ClassVar[tuple[str, ...]] = (
         "perp", "kx", "ky", "kz"
     )
@@ -104,8 +115,8 @@ class FreeEnergyDiag(FlucsDiagnostic):
         )
 
         # Free energy kernels
-        self.free_energy_kzkx_kernel = (
-            self.system.cupy_module.get_function("free_energy_kzkx")
+        self.W_kzkx_kernel = (
+            self.system.cupy_module.get_function("W_kzkx")
         )
         self.dWdt_kzkx_kernel = (
             self.system.cupy_module.get_function("dWdt_kzkx")
@@ -118,10 +129,40 @@ class FreeEnergyDiag(FlucsDiagnostic):
             for component in self.hyperdissipation_components
         }
 
+        if self.save_thetas:
+
+            # Thetap 
+            self.Wp_kzkx_kernel = (
+                self.system.cupy_module.get_function("Wp_kzkx")
+            )
+            self.dWpdt_kzkx_kernel = (
+                self.system.cupy_module.get_function("dWpdt_kzkx")
+            )
+            self.dWpdt_hyperdissipation_magnitude_kernels = {
+                component: self.system.cupy_module.get_function(
+                    f"dWpdt_hyperdissipation_{component}_kzkx"
+                )
+                for component in self.hyperdissipation_components
+            }
+
+            # Thetam
+            self.Wm_kzkx_kernel = (
+                self.system.cupy_module.get_function("Wm_kzkx")
+            )
+            self.dWmdt_kzkx_kernel = (
+                self.system.cupy_module.get_function("dWmdt_kzkx")
+            )
+            self.dWmdt_hyperdissipation_magnitude_kernels = {
+                component: self.system.cupy_module.get_function(
+                    f"dWmdt_hyperdissipation_{component}_kzkx"
+                )
+                for component in self.hyperdissipation_components
+            }
+
     def execute(self) -> None:
+        # Useful aliases
         current_dt = self.system.float(self.system.current_dt)
 
-        # Free energy W
         fields = self.system.fields[
             self.system.current_step % self.system.fields_history_size
         ]
@@ -129,24 +170,25 @@ class FreeEnergyDiag(FlucsDiagnostic):
             (self.system.current_step - 1) % self.system.fields_history_size
         ]
 
-        self.free_energy_kzkx_kernel(
+        # Free energy W
+        self.W_kzkx_kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
                 (fields, self.temp_zx),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+        )
         self.real_last_axis_sum_nx_kernel(
                 (self.system.nz,),
                 (BLOCK_SIZE,),
                 (self.temp_zx, self.temp_z),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+        )
         self.real_last_axis_sum_nz_kernel(
                 (1,),
                 (BLOCK_SIZE,),
                 (self.temp_z, self.result),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+        )
         self.save_data("W", self.result.get().item())
 
         # dW/dt
@@ -154,44 +196,44 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
                 (fields, fields_prev, current_dt, self.temp_zx),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+        )
         self.real_last_axis_sum_nx_kernel(
                 (self.system.nz,),
                 (BLOCK_SIZE,),
                 (self.temp_zx, self.temp_z),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+        )
         self.real_last_axis_sum_nz_kernel(
                 (1,),
                 (BLOCK_SIZE,),
                 (self.temp_z, self.result),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+        )
         dWdt = self.result.get().item()
         self.save_data("dWdt", dWdt)
 
-        # Hyperdissipation
+        # dW/dt hyperdissipation
         dWdt_hyperdissipation_total = 0.0
         for component, kernel in self.dWdt_hyperdissipation_magnitude_kernels.items():
             kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
                 (fields, current_dt, self.temp_zx),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
             self.real_last_axis_sum_nx_kernel(
                 (self.system.nz,),
                 (BLOCK_SIZE,),
                 (self.temp_zx, self.temp_z),
-                shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
             self.real_last_axis_sum_nz_kernel(
                     (1,),
                     (BLOCK_SIZE,),
                     (self.temp_z, self.result),
-                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes)
-
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
             dWdt_hyperdissipation_component = -self.result.get().item()
 
             self.save_data(
@@ -202,6 +244,142 @@ class FreeEnergyDiag(FlucsDiagnostic):
 
         # Error in free-energy budget
         self.save_data("dWdt_error", dWdt - dWdt_hyperdissipation_total)
+
+        if self.save_thetas:
+
+            # Wp
+            self.Wp_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("Wp", self.result.get().item())    
+
+            # dWp/dt
+            self.dWpdt_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, fields_prev, current_dt, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("dWpdt", self.result.get().item())     
+
+            # dWp/dt hyperdissipation
+            for component, kernel in self.dWpdt_hyperdissipation_magnitude_kernels.items():
+                kernel(
+                    (self.system.nx * self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (fields, current_dt, self.temp_zx),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nx_kernel(
+                    (self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (self.temp_zx, self.temp_z),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nz_kernel(
+                        (1,),
+                        (BLOCK_SIZE,),
+                        (self.temp_z, self.result),
+                        shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.save_data(
+                    f"dWpdt_hyperdissipation_{component}",
+                    -self.result.get().item()
+                )
+
+            # Wm
+            self.Wm_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("Wm", self.result.get().item())    
+
+            # dWm/dt
+            self.dWmdt_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, fields_prev, current_dt, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("dWmdt", self.result.get().item())     
+
+            # dWm/dt hyperdissipation
+            for component, kernel in self.dWmdt_hyperdissipation_magnitude_kernels.items():
+                kernel(
+                    (self.system.nx * self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (fields, current_dt, self.temp_zx),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nx_kernel(
+                    (self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (self.temp_zx, self.temp_z),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nz_kernel(
+                        (1,),
+                        (BLOCK_SIZE,),
+                        (self.temp_z, self.result),
+                        shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.save_data(
+                    f"dWmdt_hyperdissipation_{component}",
+                    -self.result.get().item()
+                )
 
 
 class HelicityDiag(FlucsDiagnostic):
@@ -226,10 +404,21 @@ class HelicityDiag(FlucsDiagnostic):
     real_last_axis_sum_nz_kernel: cp.RawKernel
 
     # Helicity kernels
-    helicity_kzkx_kernel: cp.RawKernel
+    H_kzkx_kernel: cp.RawKernel
     dHdt_kzkx_kernel: cp.RawKernel
     dHdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
 
+    # Thetap kernels
+    Hp_kzkx_kernel: cp.RawKernel
+    dHpdt_kzkx_kernel: cp.RawKernel
+    dHpdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
+
+    # Thetam kernels
+    Hm_kzkx_kernel: cp.RawKernel
+    dHmdt_kzkx_kernel: cp.RawKernel
+    dHmdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
+
+    # Components of hyperdissipation
     hyperdissipation_components: ClassVar[tuple[str, ...]] = (
         "perp", "kx", "ky", "kz"
     )
@@ -323,8 +512,8 @@ class HelicityDiag(FlucsDiagnostic):
         )
 
         # Helicity kernels
-        self.helicity_kzkx_kernel = (
-            self.system.cupy_module.get_function("helicity_kzkx")
+        self.H_kzkx_kernel = (
+            self.system.cupy_module.get_function("H_kzkx")
         )
         self.dHdt_kzkx_kernel = (
             self.system.cupy_module.get_function("dHdt_kzkx")
@@ -337,7 +526,37 @@ class HelicityDiag(FlucsDiagnostic):
             for component in self.hyperdissipation_components
         }
 
+        if self.save_thetas:
+            # Thetap 
+            self.Hp_kzkx_kernel = (
+                self.system.cupy_module.get_function("Hp_kzkx")
+            )
+            self.dHpdt_kzkx_kernel = (
+                self.system.cupy_module.get_function("dHpdt_kzkx")
+            )
+            self.dHpdt_hyperdissipation_magnitude_kernels = {
+                component: self.system.cupy_module.get_function(
+                    f"dHpdt_hyperdissipation_{component}_kzkx"
+                )
+                for component in self.hyperdissipation_components
+            }
+
+            # Thetam
+            self.Hm_kzkx_kernel = (
+                self.system.cupy_module.get_function("Hm_kzkx")
+            )
+            self.dHmdt_kzkx_kernel = (
+                self.system.cupy_module.get_function("dHmdt_kzkx")
+            )
+            self.dHmdt_hyperdissipation_magnitude_kernels = {
+                component: self.system.cupy_module.get_function(
+                    f"dHmdt_hyperdissipation_{component}_kzkx"
+                )
+                for component in self.hyperdissipation_components
+            }
+
     def execute(self) -> None:
+        # Useful aliases
         current_dt = self.system.float(self.system.current_dt)
 
         fields = self.system.fields[
@@ -348,55 +567,49 @@ class HelicityDiag(FlucsDiagnostic):
         ]
 
         # Helicity H
-        self.helicity_kzkx_kernel(
+        self.H_kzkx_kernel(
             (self.system.nx * self.system.nz,),
             (BLOCK_SIZE,),
             (fields, self.temp_zx),
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
-
         self.real_last_axis_sum_nx_kernel(
             (self.system.nz,),
             (BLOCK_SIZE,),
             (self.temp_zx, self.temp_z),
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
-
         self.real_last_axis_sum_nz_kernel(
             (1,),
             (BLOCK_SIZE,),
             (self.temp_z, self.result),
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
-
         self.save_data("H", self.result.get().item())
 
-        # dHdt
+        # dH/dt
         self.dHdt_kzkx_kernel(
             (self.system.nx * self.system.nz,),
             (BLOCK_SIZE,),
             (fields, fields_prev, current_dt, self.temp_zx),
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
-
         self.real_last_axis_sum_nx_kernel(
             (self.system.nz,),
             (BLOCK_SIZE,),
             (self.temp_zx, self.temp_z),
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
-
         self.real_last_axis_sum_nz_kernel(
             (1,),
             (BLOCK_SIZE,),
             (self.temp_z, self.result),
             shared_mem=THREADS_PER_WARP * self.system.float().nbytes
         )
-
         dHdt = self.result.get().item() 
         self.save_data("dHdt", dHdt)
 
-        # Hyperdissipation
+        # dH/dt hyperdissipation
         dHdt_hyperdissipation_total = 0.0
         for component, kernel in self.dHdt_hyperdissipation_magnitude_kernels.items():
             kernel(
@@ -405,23 +618,19 @@ class HelicityDiag(FlucsDiagnostic):
                 (fields, current_dt, self.temp_zx),
                 shared_mem=THREADS_PER_WARP * self.system.float().nbytes
             )
-
             self.real_last_axis_sum_nx_kernel(
                 (self.system.nz,),
                 (BLOCK_SIZE,),
                 (self.temp_zx, self.temp_z),
                 shared_mem=THREADS_PER_WARP * self.system.float().nbytes
             )
-
             self.real_last_axis_sum_nz_kernel(
                 (1,),
                 (BLOCK_SIZE,),
                 (self.temp_z, self.result),
                 shared_mem=THREADS_PER_WARP * self.system.float().nbytes
             )
-
             dHdt_hyperdissipation_component = -self.result.get().item()
-
             self.save_data(
                 f"dHdt_hyperdissipation_{component}",
                 dHdt_hyperdissipation_component
@@ -430,3 +639,139 @@ class HelicityDiag(FlucsDiagnostic):
 
         # Error in helicity budget
         self.save_data("dHdt_error", dHdt - dHdt_hyperdissipation_total)
+
+        if self.save_thetas:
+
+            # Hp
+            self.Hp_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("Hp", self.result.get().item())    
+
+            # dHp/dt
+            self.dHpdt_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, fields_prev, current_dt, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("dHpdt", self.result.get().item())     
+
+            # dHp/dt hyperdissipation
+            for component, kernel in self.dHpdt_hyperdissipation_magnitude_kernels.items():
+                kernel(
+                    (self.system.nx * self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (fields, current_dt, self.temp_zx),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nx_kernel(
+                    (self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (self.temp_zx, self.temp_z),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nz_kernel(
+                        (1,),
+                        (BLOCK_SIZE,),
+                        (self.temp_z, self.result),
+                        shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.save_data(
+                    f"dHpdt_hyperdissipation_{component}",
+                    -self.result.get().item()
+                )
+
+            # Hm
+            self.Hm_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("Hm", self.result.get().item())    
+
+            # dHm/dt
+            self.dHmdt_kzkx_kernel(
+                (self.system.nx * self.system.nz,),
+                (BLOCK_SIZE,),
+                (fields, fields_prev, current_dt, self.temp_zx),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nx_kernel(
+                (self.system.nz,),
+                (BLOCK_SIZE,),
+                (self.temp_zx, self.temp_z),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            )
+            self.real_last_axis_sum_nz_kernel(
+                (1,),
+                (BLOCK_SIZE,),
+                (self.temp_z, self.result),
+                shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+            ) 
+            self.save_data("dHmdt", self.result.get().item())     
+
+            # dHm/dt hyperdissipation
+            for component, kernel in self.dHmdt_hyperdissipation_magnitude_kernels.items():
+                kernel(
+                    (self.system.nx * self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (fields, current_dt, self.temp_zx),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nx_kernel(
+                    (self.system.nz,),
+                    (BLOCK_SIZE,),
+                    (self.temp_zx, self.temp_z),
+                    shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.real_last_axis_sum_nz_kernel(
+                        (1,),
+                        (BLOCK_SIZE,),
+                        (self.temp_z, self.result),
+                        shared_mem=THREADS_PER_WARP * self.system.float().nbytes
+                )
+                self.save_data(
+                    f"dHmdt_hyperdissipation_{component}",
+                    -self.result.get().item()
+                )
