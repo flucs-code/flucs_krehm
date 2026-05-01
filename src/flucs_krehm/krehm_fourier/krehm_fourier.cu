@@ -265,7 +265,8 @@ void get_thetas_from_fields(
     const size_t index,
     const FLUCS_COMPLEX* fields,
     FLUCS_COMPLEX& thetap,
-    FLUCS_COMPLEX& thetam
+    FLUCS_COMPLEX& thetam,
+    FLUCS_FLOAT& vphase
 ){
     // Indices
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -284,15 +285,16 @@ void get_thetas_from_fields(
 
     // Useful intermediate quantities
     const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
-    const FLUCS_FLOAT vph = get_phase_velocity(kperp2, gamma_factor);
+    vphase = get_phase_velocity(kperp2, gamma_factor);
 
     // Construct Elsasser potentials
-    const FLUCS_FLOAT phi_factor = vph * gamma_factor;
+    const FLUCS_FLOAT phi_factor = vphase * gamma_factor;
     const FLUCS_FLOAT prefactor = sqrt(FLOAT_ONE + kperp2 * DE2);
 
     thetap = prefactor * (phi_factor * phi + apar);
     thetam = prefactor * (phi_factor * phi - apar);
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Free Energy (W)
@@ -340,7 +342,8 @@ struct FreeEnergyThetap_Functor {
 
         // Thetas
         FLUCS_COMPLEX thetap, thetam;
-        get_thetas_from_fields(index, fields, thetap, thetam);
+        FLUCS_FLOAT vphase;
+        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
 
         return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
             * (thetap.real()*thetap.real() + thetap.imag()*thetap.imag());
@@ -361,7 +364,8 @@ struct FreeEnergyThetam_Functor {
 
         // Thetas
         FLUCS_COMPLEX thetap, thetam;
-        get_thetas_from_fields(index, fields, thetap, thetam);
+        FLUCS_FLOAT vphase;
+        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
 
         return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
             * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag());
@@ -696,15 +700,12 @@ struct HelicityThetap_Functor {
 
         // Thetas
         FLUCS_COMPLEX thetap, thetam;
-        get_thetas_from_fields(index, fields, thetap, thetam);
-
-        // Phase velocity
-        const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
-        const FLUCS_FLOAT vph = get_phase_velocity(kperp2, gamma_factor);
+        FLUCS_FLOAT vphase;
+        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
 
         return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
             * (thetap.real()*thetap.real() + thetap.imag()*thetap.imag())
-            / vph;
+            / vphase;
     }
 };
 
@@ -722,15 +723,12 @@ struct HelicityThetam_Functor {
 
         // Thetas
         FLUCS_COMPLEX thetap, thetam;
-        get_thetas_from_fields(index, fields, thetap, thetam);
-
-        // Phase velocity
-        const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
-        const FLUCS_FLOAT vph = get_phase_velocity(kperp2, gamma_factor);
+        FLUCS_FLOAT vphase;
+        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
 
         return multiplier * ((FLUCS_FLOAT)0.5) * kperp2
             * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag())
-            / vph;
+            / vphase;
     }
 };
 
