@@ -295,9 +295,98 @@ void get_thetas_from_fields(
     thetam = prefactor * (phi_factor * phi - apar);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Forcing
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef FORCING
+
+#if defined(FORCING_METHOD_ELSASSER)
+__device__ __forceinline__
+void get_forcing_elsasser(
+    const size_t index,
+    const FLUCS_FLOAT dt,
+    const long long current_step,
+    const FLUCS_COMPLEX* previous_fields,
+    FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS]
+)
+{
+    // Unused variables
+    (void)dt;
+    (void)current_step;
+
+    // Indices
+    indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+    const size_t ikx = indices.ikx;
+    const size_t iky = indices.iky;
+
+    // Wavenumbers 
+    const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+    const FLUCS_FLOAT ky = ky_from_iky(iky);
+
+    const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+    if (kperp2 == ((FLUCS_FLOAT)0.0))
+        return;
+
+    // Get fields and matrices
+    FLUCS_COMPLEX thetap, thetam;
+    FLUCS_FLOAT vphase;
+    get_thetas_from_fields(index, previous_fields, thetap, thetam, vphase);
+
+    const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
+
+    // Energies
+    const FLUCS_FLOAT Wp = (
+          ((FLUCS_FLOAT)0.5) * kperp2 
+        * (thetap.real()*thetap.real() + thetap.imag()*thetap.imag())
+    );
+    const FLUCS_FLOAT Wm = (
+          ((FLUCS_FLOAT)0.5) * kperp2 
+        * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag())
+    );
+
+    // Forcing in thetas
+    FLUCS_COMPLEX forcing_p = FLUCS_COMPLEX(0, 0);
+    FLUCS_COMPLEX forcing_m = FLUCS_COMPLEX(0, 0);
+
+    if (Wp > ((FLUCS_FLOAT)0.0))
+        forcing_p = ((FLUCS_FLOAT)0.5) * FORCING_EPSILON_PLUS  * thetap / Wp;
+    if (Wm > ((FLUCS_FLOAT)0.0))
+        forcing_m = ((FLUCS_FLOAT)0.5) * FORCING_EPSILON_MINUS * thetam / Wm;
+
+    // Construct forcing
+    forcing_terms[0] += (
+          (FLOAT_ONE / sqrt(FLOAT_ONE + kperp2 * DE2)) 
+        * (FLOAT_ONE / (vphase * gamma_factor)) 
+        * (forcing_p + forcing_m) / ((FLUCS_FLOAT)2.0)
+    );
+    forcing_terms[1] += (
+          (FLOAT_ONE / sqrt(FLOAT_ONE + kperp2 * DE2))                                           
+        * (forcing_p - forcing_m) / ((FLUCS_FLOAT)2.0)
+    );
+}
+#endif
+
+__device__ void get_forcing(
+    const size_t index,
+    const FLUCS_FLOAT dt, 
+    const long long current_step,
+    const FLUCS_COMPLEX* previous_fields,
+    FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] 
+){
+    #if defined(FORCING_METHOD_ELSASSER)
+        get_forcing_elsasser(
+            index, dt, current_step, previous_fields, forcing_terms
+        );
+    #endif
+}
+
+#endif
+
 
 ////////////////////////////////////////////////////////////////////////////////
-// Free Energy (W)
+// Diagnostics: Free Energy (W)
 ////////////////////////////////////////////////////////////////////////////////
 
 struct FreeEnergy_Functor {
@@ -654,7 +743,7 @@ void dWmdt_hyperdissipation_perp_kzkx(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Helicity (H)
+// Diagnostics: Helicity (H)
 ////////////////////////////////////////////////////////////////////////////////
 
 struct Helicity_Functor {

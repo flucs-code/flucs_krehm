@@ -9,3 +9,9 @@ ion_charge = 1.0
 rhoi = 0.0
 de = 0.0
 beta_over_mass_ratio = -1.0
+
+[forcing]
+
+# method = "elsasser"
+energy_injection_rate = 0.1
+injection_imbalance = 0.0

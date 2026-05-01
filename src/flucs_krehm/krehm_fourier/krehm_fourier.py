@@ -40,6 +40,9 @@ class KREHMFourier(FourierSystem):
         HelicityDiag
     }
 
+    # Supported forcing
+    system_forcing_methods: ClassVar[frozenset[str]] = frozenset({"elsasser"})
+
     def ready(self):
         # Anything system-specific goes here
 
@@ -113,6 +116,7 @@ class KREHMFourier(FourierSystem):
 
         # Check and set all physical parameters
         self._interpret_physical_parameters()
+        self._interpret_forcing_parameters()
 
     def _interpret_physical_parameters(self):
         """
@@ -173,11 +177,56 @@ class KREHMFourier(FourierSystem):
         self.de = de
         self.beta_over_mass_ratio = beta_over_mass_ratio
 
+    def _interpret_forcing_parameters(self):
+        """
+        Infers runtime parameters related to the various forcing methods 
+        specific to isothermal KREHM
+        """
+
+        # Nothing to do if not forcing
+        if not self.input["forcing.method"]:
+            return
+
+        # Elsasser forcing
+        if self.input["forcing.method"] == "elsasser":
+
+            # Alias parameters
+            energy_injection_rate = self.input["forcing.energy_injection_rate"]
+
+            if energy_injection_rate < 0.0:
+                raise InvalidFlucsInputFileError(
+                    "forcing.energy_injection_rate must be positive "
+                    "semi-definite."
+                )   
+            
+            injection_imbalance = self.input["forcing.injection_imbalance"]
+            if injection_imbalance < 0.0 or injection_imbalance > 1.0:
+                raise InvalidFlucsInputFileError(
+                    "forcing.injection_imbalance must be between 0 and 1."
+                )
+            
+            # Get plus and minus injection
+            self.forcing_epsilon_plus  = (
+                energy_injection_rate * (1 + injection_imbalance) / 2
+            )
+            self.forcing_epsilon_minus = (
+                energy_injection_rate * (1 - injection_imbalance) / 2
+            )
+
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels
         self.module_options.define_float("ZTE_OVER_TI", self.ZTe_over_Ti)
         self.module_options.define_float("RHOI2", self.rhoi**2)
         self.module_options.define_float("DE2", self.de**2)
+
+        # Forcing
+        if self.input["forcing.method"] == "elsasser":
+            self.module_options.define_float(
+                "FORCING_EPSILON_PLUS", self.forcing_epsilon_plus
+            )
+            self.module_options.define_float(
+                "FORCING_EPSILON_MINUS", self.forcing_epsilon_minus
+            )
 
         # Call this to compile the module
         super().compile_cupy_module()
