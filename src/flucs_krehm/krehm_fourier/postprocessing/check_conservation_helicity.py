@@ -36,6 +36,8 @@ def helicity_check(post):
         dHdt = post.load_netcdf_variable(nc_path, "helicity/dHdt")[0]
         dHdt_forcing = post.load_netcdf_variable(nc_path, "helicity/dHdt_forcing")[0]
         dHdt_error = post.load_netcdf_variable(nc_path, "helicity/dHdt_error")[0]
+
+        # Injection and dissipation
         injection = dHdt_forcing
         dissipation = np.zeros_like(dHdt)
 

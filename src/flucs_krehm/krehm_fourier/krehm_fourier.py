@@ -17,82 +17,71 @@ from flucs.utilities.messages import flucsprint
 
 from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
 
-
 class KREHMFourierElsasserForcing(FourierSystemForcing):
     explicit = True
     linear = False
 
-    def setup_cuda_defs(self):
+    def setup_cuda_definitions(self):
         # Alias parameters
         system = self.system
         energy_injection_rate = system.input["forcing.energy_injection_rate"]
+
         # Forcing bands
-        kperp_band = system.input["forcing.kperp_band"]
-        kz_band = system.input["forcing.kz_band"]
+        range_kperp = system.input["forcing.range_kperp"]
+        range_kz = system.input["forcing.range_kz"]
 
-        if len(kperp_band) != 2:
+        if len(range_kperp) != 2:
             raise InvalidFlucsInputFileError(
-                "forcing.kperp_band must be a list [kperp_min, kperp_max]."
+                "forcing.range_kperp must be a list [kperp_min, kperp_max]."
             )
 
-        if len(kz_band) != 2:
+        if len(range_kz) != 2:
             raise InvalidFlucsInputFileError(
-                "forcing.kz_band must be a list [kz_min, kz_max]."
+                "forcing.range_kz must be a list [kz_min, kz_max]."
             )
 
-        kperp_min = kperp_band[0]
-        kperp_max = kperp_band[1]
+        kperp_min = range_kperp[0]
+        kperp_max = range_kperp[1]
         if kperp_max < kperp_min:
             raise InvalidFlucsInputFileError(
                 "forcing.kperp_max must be larger than forcing.kperp_min."
             )
 
-        kz_min = kz_band[0]
-        kz_max = kz_band[1]
+        kz_min = range_kz[0]
+        kz_max = range_kz[1]
         if kz_max < kz_min:
             raise InvalidFlucsInputFileError(
                 "forcing.kz_max must be larger than forcing.kz_min."
             )
 
-        system.module_options.define_float(
-            "FORCING_KPERP2_MIN", kperp_min**2
-        )
-        system.module_options.define_float(
-            "FORCING_KPERP2_MAX", kperp_max**2
-        )
+        system.module_options.define_float("FORCING_KPERP2_MIN", kperp_min**2)
+        system.module_options.define_float("FORCING_KPERP2_MAX", kperp_max**2)
+        system.module_options.define_float("FORCING_KZ_MIN", kz_min)
+        system.module_options.define_float("FORCING_KZ_MAX", kz_max)
 
-        system.module_options.define_float(
-            "FORCING_KZ_MIN", kz_min
-        )
-        system.module_options.define_float(
-            "FORCING_KZ_MAX", kz_max
-        )
-
-        # Count how many modes are forced
+        # Determine number of forced modes
         system._precompute_wavenumbers()
         kx, ky, kz = system.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
 
-        number_of_forced_modes_halfny = np.sum(
-            (kperp2 > kperp_min**2) &
-            (kperp2 < kperp_max**2) &
-            (kz > kz_min) &
-            (kz < kz_max)
+        forced_modes_halfny = (
+            (kperp2 > kperp_min**2)
+            & (kperp2 < kperp_max**2)
+            & (kz > kz_min)
+            & (kz < kz_max)
         )
-
-        # Take care not to double count ky = 0 modes
-        number_of_forced_modes_halfny_ky0 = np.sum(
-            (kperp2 > kperp_min**2) &
-            (kperp2 < kperp_max**2) &
-            (kz > kz_min) &
-            (kz < kz_max) &
-            (ky < 0.5 * ky[0, 0, 1])
-        )
+        ky0_modes = ky < 0.5 * ky[0, 0, 1]
 
         number_of_forced_modes = (
-            2 * number_of_forced_modes_halfny
-            - number_of_forced_modes_halfny_ky0
+            2 * np.sum(forced_modes_halfny)
+            - np.sum(forced_modes_halfny & ky0_modes)
         )
+
+        if number_of_forced_modes == 0:
+            raise InvalidFlucsInputFileError(
+                "No modes are being forced. Please check your forcing.range_kz "
+                "and/or forcing.range_kperp."
+            )
 
         flucsprint(
             "Using Elsasser forcing on a total of "
@@ -100,7 +89,7 @@ class KREHMFourierElsasserForcing(FourierSystemForcing):
             source=self
         )
 
-        # Calculate injection into theta^+ and theta^-
+        # Validate energy injection rate and injection imbalance
         if energy_injection_rate < 0.0:
             raise InvalidFlucsInputFileError(
                 "forcing.energy_injection_rate must be positive "
@@ -122,16 +111,19 @@ class KREHMFourierElsasserForcing(FourierSystemForcing):
         )
 
         system.module_options.define_float(
-            "FORCING_EPSILON_PLUS", forcing_epsilon_plus / number_of_forced_modes
+            "FORCING_EPSILON_PLUS", 
+            forcing_epsilon_plus / number_of_forced_modes
         )
         system.module_options.define_float(
-            "FORCING_EPSILON_MINUS", forcing_epsilon_minus / number_of_forced_modes
+            "FORCING_EPSILON_MINUS", 
+            forcing_epsilon_minus / number_of_forced_modes
         )
 
-
-
 class KREHMFourier(FourierSystem):
-    """Fourier solver for the isothermal KREHM system."""
+    """
+    Fourier solver for the isothermal KREHM system.
+
+    """
     number_of_fields = 2
     number_of_fields_explicit = 2
     number_of_dft_derivatives = 6

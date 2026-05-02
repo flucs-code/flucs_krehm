@@ -304,7 +304,7 @@ void add_forcing_elsasser(
     const FLUCS_FLOAT dt,
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT]
 )
 {
     // Unused variables
@@ -327,11 +327,10 @@ void add_forcing_elsasser(
     if (kperp2 == ((FLUCS_FLOAT)0.0))
         return;
     
-    if (kperp2 < FORCING_KPERP2_MIN ||
-        kperp2 > FORCING_KPERP2_MAX ||
-        kz < FORCING_KZ_MIN ||
-        kz > FORCING_KZ_MAX)
-
+    if (!(kperp2 > FORCING_KPERP2_MIN &&
+          kperp2 < FORCING_KPERP2_MAX &&
+          kz > FORCING_KZ_MIN &&
+          kz < FORCING_KZ_MAX))
         return;
 
     // Get fields and matrices
@@ -379,12 +378,12 @@ void add_forcing_elsasser(
 }
 #endif
 
-__device__ void add_explicit_forcing(
+__device__ void add_forcing_explicit(
     const size_t index,
     const FLUCS_FLOAT dt, 
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS] 
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT] 
 ){
     #if defined(FORCING_METHOD_ELSASSER)
         add_forcing_elsasser(
