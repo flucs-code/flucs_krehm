@@ -183,20 +183,16 @@ __global__ void find_nonlinear_bits(
 }
 
 // Returns the nonlinear terms for a given mode
-__device__ void get_nonlinear_terms(
+__device__ void add_nonlinear_terms(
     const size_t index,
     const FLUCS_COMPLEX* dft_bits,
-    FLUCS_COMPLEX* nonlinear_terms
+    FLUCS_COMPLEX* explicit_terms
 ){
     // Indices
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
     const size_t ikx = indices.ikx;
     const size_t iky = indices.iky;
     const size_t ikz = indices.ikz;
-
-    // Initialise nonlinear terms
-    nonlinear_terms[0] = FLUCS_COMPLEX(0, 0);
-    nonlinear_terms[1] = FLUCS_COMPLEX(0, 0);
 
     // Ignore kperp2 = 0 modes
     if (ikx == 0 && iky == 0)
@@ -213,14 +209,14 @@ __device__ void get_nonlinear_terms(
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
     
     // Calculate nonnlinear terms
-    nonlinear_terms[0] = DFT_PADDEDSIZE_FACTOR * (
+    explicit_terms[0] += DFT_PADDEDSIZE_FACTOR * (
         + FLUCS_COMPLEX(-ky * dft_bits[padded_index].imag(),
                          ky * dft_bits[padded_index].real())
         - FLUCS_COMPLEX(-kx * dft_bits[padded_index + HALFPADDEDSIZE].imag(),
                          kx * dft_bits[padded_index + HALFPADDEDSIZE].real())
     ) / (one_minus_gamma0_over_alpha(kperp2) * kperp2);
 
-    nonlinear_terms[1] = DFT_PADDEDSIZE_FACTOR * (
+    explicit_terms[1] += DFT_PADDEDSIZE_FACTOR * (
         + dft_bits[padded_index + 4*HALFPADDEDSIZE]
         + FLUCS_COMPLEX(-ky * dft_bits[padded_index + 2*HALFPADDEDSIZE].imag(),
                          ky * dft_bits[padded_index + 2*HALFPADDEDSIZE].real())
@@ -232,7 +228,7 @@ __device__ void get_nonlinear_terms(
 
 // Mapping of nonlinear terms to fields
 __device__ __forceinline__
-int nonlinear_term_field_index(const int term_index) {
+int explicit_term_field_index(const int term_index) {
     return term_index; // Trivial indexing in this case
 }
 
@@ -252,7 +248,7 @@ FLUCS_FLOAT get_phase_velocity(
 
     return sqrt(
         (ZTE_OVER_TI * alpha + FLOAT_ONE/one_minus_gamma0_over_alpha)
-        /((FLOAT_ONE + DE2 * kperp2))
+        / (FLOAT_ONE + DE2 * kperp2)
     );
 }
 
@@ -303,12 +299,12 @@ void get_thetas_from_fields(
 
 #if defined(FORCING_METHOD_ELSASSER)
 __device__ __forceinline__
-void get_forcing_elsasser(
+void add_forcing_elsasser(
     const size_t index,
     const FLUCS_FLOAT dt,
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS]
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
 )
 {
     // Unused variables
@@ -319,14 +315,23 @@ void get_forcing_elsasser(
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
     const size_t ikx = indices.ikx;
     const size_t iky = indices.iky;
+    const size_t ikz = indices.ikz;
 
     // Wavenumbers 
     const FLUCS_FLOAT kx = kx_from_ikx(ikx);
     const FLUCS_FLOAT ky = ky_from_iky(iky);
+    const FLUCS_FLOAT kz = kz_from_ikz(ikz);
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
     if (kperp2 == ((FLUCS_FLOAT)0.0))
+        return;
+    
+    if (kperp2 < FORCING_KPERP2_MIN ||
+        kperp2 > FORCING_KPERP2_MAX ||
+        kz < FORCING_KZ_MIN ||
+        kz > FORCING_KZ_MAX)
+
         return;
 
     // Get fields and matrices
@@ -355,29 +360,35 @@ void get_forcing_elsasser(
     if (Wm > ((FLUCS_FLOAT)0.0))
         forcing_m = ((FLUCS_FLOAT)0.5) * FORCING_EPSILON_MINUS * thetam / Wm;
 
+    const FLUCS_FLOAT sqrt_one_plus_kperpde2 = sqrt(FLOAT_ONE + kperp2 * DE2);
+
     // Construct forcing
-    forcing_terms[0] += (
-          (FLOAT_ONE / sqrt(FLOAT_ONE + kperp2 * DE2)) 
-        * (FLOAT_ONE / (vphase * gamma_factor)) 
-        * (forcing_p + forcing_m) / ((FLUCS_FLOAT)2.0)
+    explicit_terms[0] -= (
+        (forcing_p + forcing_m) / (
+            (FLUCS_FLOAT)2.0
+            * vphase * gamma_factor
+            * sqrt_one_plus_kperpde2
+        )
     );
-    forcing_terms[1] += (
-          (FLOAT_ONE / sqrt(FLOAT_ONE + kperp2 * DE2))                                           
-        * (forcing_p - forcing_m) / ((FLUCS_FLOAT)2.0)
+    explicit_terms[1] -= (
+        (forcing_p - forcing_m) / (
+            (FLUCS_FLOAT)2.0
+            * sqrt_one_plus_kperpde2
+        )
     );
 }
 #endif
 
-__device__ void get_forcing(
+__device__ void add_explicit_forcing(
     const size_t index,
     const FLUCS_FLOAT dt, 
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] 
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS] 
 ){
     #if defined(FORCING_METHOD_ELSASSER)
-        get_forcing_elsasser(
-            index, dt, current_step, previous_fields, forcing_terms
+        add_forcing_elsasser(
+            index, dt, current_step, previous_fields, explicit_terms
         );
     #endif
 }
@@ -412,6 +423,37 @@ struct FreeEnergy_Functor {
         const FLUCS_FLOAT apar_contribution = (
             kperp2 * (1 + DE2 * kperp2)
         ) * (apar.real() * apar.real() + apar.imag() * apar.imag());
+
+        return multiplier * (phi_contribution + apar_contribution);
+    }
+};
+
+struct FreeEnergyForcing_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT multiplier;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        const FLUCS_COMPLEX phi = fields[index];
+        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
+
+        add_forcing_elsasser(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const size_t ikx = indices.ikx;
+        const size_t iky = indices.iky;
+
+        const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        const FLUCS_FLOAT phi_contribution = -2.0 * (
+            (1 + taubarinv(kperp2)) * one_minus_gamma0_over_alpha(kperp2) * kperp2 
+        ) * (phi.real() * forcing_terms[0].real() + phi.imag() * forcing_terms[0].imag());
+
+        const FLUCS_FLOAT apar_contribution = -2.0 * (
+            kperp2 * (1 + DE2 * kperp2)
+        ) * (apar.real() * forcing_terms[1].real() + apar.imag() * forcing_terms[1].imag());
 
         return multiplier * (phi_contribution + apar_contribution);
     }
@@ -518,6 +560,21 @@ void dWdt_kzkx(
             output,
             FreeEnergy_Functor{fields_now, FLOAT_ONE},
             FreeEnergy_Functor{fields_prev, -FLOAT_ONE}
+        );
+
+}
+
+// W forcing
+__global__
+void dWdt_forcing_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+){
+
+    add_and_sum_last_axis<HALF_NY, true>(
+            FLOAT_ONE,
+            output,
+            FreeEnergyForcing_Functor{fields, FLOAT_ONE}
         );
 
 }
@@ -775,6 +832,39 @@ struct Helicity_Functor {
     }
 };
 
+struct HelicityForcing_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT multiplier;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        const FLUCS_COMPLEX phi = fields[index];
+        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
+
+        add_forcing_elsasser(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const size_t ikx = indices.ikx;
+        const size_t iky = indices.iky;
+
+        const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        const FLUCS_FLOAT cross_term = -(
+            phi.real() * forcing_terms[1].real() + phi.imag() * forcing_terms[1].imag() +
+            apar.real() * forcing_terms[0].real() + apar.imag() * forcing_terms[0].imag()
+        );
+
+        const FLUCS_FLOAT helicity = - ((FLUCS_FLOAT)2.0) * (
+            one_minus_gamma0_over_alpha(kperp2) * kperp2 
+            * (FLOAT_ONE + DE2 * kperp2) * cross_term
+        );
+
+        return multiplier * helicity;
+    }
+};
+
 struct HelicityThetap_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT multiplier;
@@ -832,6 +922,21 @@ void H_kzkx(
         output,
         Helicity_Functor{fields, FLOAT_ONE}
     );
+}
+
+// H forcing
+__global__
+void dHdt_forcing_kzkx(
+    const FLUCS_COMPLEX* fields,
+    FLUCS_FLOAT* output
+){
+
+    add_and_sum_last_axis<HALF_NY, true>(
+            FLOAT_ONE,
+            output,
+            HelicityForcing_Functor{fields, FLOAT_ONE}
+        );
+
 }
 
 __global__

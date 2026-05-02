@@ -15,3 +15,5 @@ beta_over_mass_ratio = -1.0
 # method = "elsasser"
 energy_injection_rate = 0.1
 injection_imbalance = 0.0
+kperp_band = [1.0, 1.2]
+kz_band = [1.0, 1.2]

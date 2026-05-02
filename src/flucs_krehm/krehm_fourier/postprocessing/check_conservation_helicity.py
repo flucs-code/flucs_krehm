@@ -34,8 +34,9 @@ def helicity_check(post):
         dt = post.load_netcdf_variable(nc_path, "dt")[0]
         helicity = post.load_netcdf_variable(nc_path, "helicity/H")[0]
         dHdt = post.load_netcdf_variable(nc_path, "helicity/dHdt")[0]
+        dHdt_forcing = post.load_netcdf_variable(nc_path, "helicity/dHdt_forcing")[0]
         dHdt_error = post.load_netcdf_variable(nc_path, "helicity/dHdt_error")[0]
-        injection = np.zeros_like(dHdt)
+        injection = dHdt_forcing
         dissipation = np.zeros_like(dHdt)
 
         # Add hyperdissipation
@@ -53,9 +54,9 @@ def helicity_check(post):
 
         # Plot helicity balance
         ax_balance.plot(time, dHdt, label="dH/dt", linewidth=1.5, color='black', linestyle='solid')
-        # ax_balance.plot(time, injection, label="Injection", linewidth=1.5, color='red', linestyle='solid')
+        ax_balance.plot(time, injection, label="Injection", linewidth=1.5, color='red', linestyle='solid')
         ax_balance.plot(time, dissipation, label="Dissipation", linewidth=1.5, color='blue', linestyle='solid')
-        # ax_balance.plot(time, injection + dissipation, label="Injection + dissipation", linewidth=1.5, color='black', linestyle='dashed')
+        ax_balance.plot(time, injection + dissipation, label="Injection + dissipation", linewidth=1.5, color='black', linestyle='dashed')
 
         # Compute and plot measures of the error in the helicity balance
         integrand = 0.5 * (dHdt_error[1:] + dHdt_error[:-1]) * np.diff(time) # Manual trapezoidal rule

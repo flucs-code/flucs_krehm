@@ -33,9 +33,9 @@ def free_energy_check(post):
         # Load data
         dt = post.load_netcdf_variable(nc_path, "dt")[0]
         free_energy = post.load_netcdf_variable(nc_path, "free_energy/W")[0]
+        free_energy_forcing = post.load_netcdf_variable(nc_path, "free_energy/dWdt_forcing")[0]
         dWdt = post.load_netcdf_variable(nc_path, "free_energy/dWdt")[0]
         dWdt_error = post.load_netcdf_variable(nc_path, "free_energy/dWdt_error")[0]
-        injection = np.zeros_like(dWdt)
         dissipation = np.zeros_like(dWdt)
 
         # Add hyperdissipation
@@ -53,9 +53,9 @@ def free_energy_check(post):
 
         # Plot free-energy balance
         ax_balance.plot(time, dWdt, label="dW/dt", linewidth=1.5, color='black', linestyle='solid')
-        # ax_balance.plot(time, injection, label="Injection", linewidth=1.5, color='red', linestyle='solid')
+        ax_balance.plot(time, free_energy_forcing, label="W forcing", linewidth=1.5, color='red', linestyle='solid')
         ax_balance.plot(time, dissipation, label="Dissipation", linewidth=1.5, color='blue', linestyle='solid')
-        # ax_balance.plot(time, injection + dissipation, label="Injection + dissipation", linewidth=1.5, color='black', linestyle='dashed')
+        ax_balance.plot(time, free_energy_forcing + dissipation, label="Forcing + dissipation", linewidth=1.5, color='black', linestyle='dashed')
 
         # Compute and plot measures of the error in the free-energy balance
         integrand = 0.5 * (dWdt_error[1:] + dWdt_error[:-1]) * np.diff(time) # Manual trapezoidal rule 
@@ -65,7 +65,7 @@ def free_energy_check(post):
         accumulated_error[0] = 0.0
         accumulated_error[1:] = np.nancumsum(integrand)/normalisation
  
-        instantaneous_error = dWdt_error/(np.abs(dWdt) + np.abs(injection) + np.abs(dissipation))
+        instantaneous_error = dWdt_error/(np.abs(dWdt) + np.abs(free_energy_forcing) + np.abs(dissipation))
 
         ax_error.plot(time, np.abs(accumulated_error), label="Accumulated", linewidth=1.5, color='black', linestyle='solid')
         ax_error.plot(time, np.abs(instantaneous_error), label="Instantaneous", linewidth=1.5, color='blue', linestyle='solid')

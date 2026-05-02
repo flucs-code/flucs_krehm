@@ -10,17 +10,130 @@ import numpy as np
 from scipy.special import i0e
 from cupy.cuda import cufft
 from flucs.diagnostic import FlucsDiagnostic
-from flucs.solvers.fourier.fourier_system import FourierSystem
+from flucs.solvers.fourier.fourier_system import FourierSystem, FourierSystemForcing
 from flucs.utilities.cupy import cupy_set_device_pointer
 from flucs.input import InvalidFlucsInputFileError
+from flucs.utilities.messages import flucsprint
 
 from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
+
+
+class KREHMFourierElsasserForcing(FourierSystemForcing):
+    explicit = True
+    linear = False
+
+    def setup_cuda_defs(self):
+        # Alias parameters
+        system = self.system
+        energy_injection_rate = system.input["forcing.energy_injection_rate"]
+        # Forcing bands
+        kperp_band = system.input["forcing.kperp_band"]
+        kz_band = system.input["forcing.kz_band"]
+
+        if len(kperp_band) != 2:
+            raise InvalidFlucsInputFileError(
+                "forcing.kperp_band must be a list [kperp_min, kperp_max]."
+            )
+
+        if len(kz_band) != 2:
+            raise InvalidFlucsInputFileError(
+                "forcing.kz_band must be a list [kz_min, kz_max]."
+            )
+
+        kperp_min = kperp_band[0]
+        kperp_max = kperp_band[1]
+        if kperp_max < kperp_min:
+            raise InvalidFlucsInputFileError(
+                "forcing.kperp_max must be larger than forcing.kperp_min."
+            )
+
+        kz_min = kz_band[0]
+        kz_max = kz_band[1]
+        if kz_max < kz_min:
+            raise InvalidFlucsInputFileError(
+                "forcing.kz_max must be larger than forcing.kz_min."
+            )
+
+        system.module_options.define_float(
+            "FORCING_KPERP2_MIN", kperp_min**2
+        )
+        system.module_options.define_float(
+            "FORCING_KPERP2_MAX", kperp_max**2
+        )
+
+        system.module_options.define_float(
+            "FORCING_KZ_MIN", kz_min
+        )
+        system.module_options.define_float(
+            "FORCING_KZ_MAX", kz_max
+        )
+
+        # Count how many modes are forced
+        system._precompute_wavenumbers()
+        kx, ky, kz = system.get_broadcast_wavenumbers()
+        kperp2 = kx**2 + ky**2
+
+        number_of_forced_modes_halfny = np.sum(
+            (kperp2 > kperp_min**2) &
+            (kperp2 < kperp_max**2) &
+            (kz > kz_min) &
+            (kz < kz_max)
+        )
+
+        # Take care not to double count ky = 0 modes
+        number_of_forced_modes_halfny_ky0 = np.sum(
+            (kperp2 > kperp_min**2) &
+            (kperp2 < kperp_max**2) &
+            (kz > kz_min) &
+            (kz < kz_max) &
+            (ky < 0.5 * ky[0, 0, 1])
+        )
+
+        number_of_forced_modes = (
+            2 * number_of_forced_modes_halfny
+            - number_of_forced_modes_halfny_ky0
+        )
+
+        flucsprint(
+            "Using Elsasser forcing on a total of "
+            f"{number_of_forced_modes} modes.",
+            source=self
+        )
+
+        # Calculate injection into theta^+ and theta^-
+        if energy_injection_rate < 0.0:
+            raise InvalidFlucsInputFileError(
+                "forcing.energy_injection_rate must be positive "
+                "semi-definite."
+            )
+
+        injection_imbalance = system.input["forcing.injection_imbalance"]
+        if injection_imbalance < 0.0 or injection_imbalance > 1.0:
+            raise InvalidFlucsInputFileError(
+                "forcing.injection_imbalance must be between 0 and 1."
+            )
+
+        # Get plus and minus injection
+        forcing_epsilon_plus = (
+            energy_injection_rate * (1 + injection_imbalance) / 2
+        )
+        forcing_epsilon_minus = (
+            energy_injection_rate * (1 - injection_imbalance) / 2
+        )
+
+        system.module_options.define_float(
+            "FORCING_EPSILON_PLUS", forcing_epsilon_plus / number_of_forced_modes
+        )
+        system.module_options.define_float(
+            "FORCING_EPSILON_MINUS", forcing_epsilon_minus / number_of_forced_modes
+        )
+
 
 
 class KREHMFourier(FourierSystem):
     """Fourier solver for the isothermal KREHM system."""
     number_of_fields = 2
-    number_of_fields_nonlinear = 2
+    number_of_fields_explicit = 2
     number_of_dft_derivatives = 6
     number_of_dft_bits = 5
 
@@ -41,22 +154,19 @@ class KREHMFourier(FourierSystem):
     }
 
     # Supported forcing
-    system_forcing_methods: ClassVar[frozenset[str]] = frozenset({"elsasser"})
+    system_forcing_methods: ClassVar[dict[str, FourierSystemForcing]] = {
+        "elsasser": KREHMFourierElsasserForcing,
+    }
 
     def ready(self):
         # Anything system-specific goes here
+        super().ready()
 
-        if not self.input["setup.linear"]:
-            cupy_set_device_pointer(self.cupy_module,
-                                    "multistep_nonlinear_terms",
-                                    self.multistep_nonlinear_terms)
-
-        # Setup kernel parameters (grid, block, shared memory)
+    def setup_cuda_grids(self):
+        super().setup_cuda_grids()
         self.nonlinear_bits_shared_mem = (
             self.cuda_block_size * self.float().nbytes
         )
-
-        super().ready()
 
     def _allocate_memory(self):
         """Allocates runtime arrays."""
@@ -77,11 +187,11 @@ class KREHMFourier(FourierSystem):
                                memptr=self.fields[1][0, 0, 0, 0].data),]
 
         self.apar = [cp.ndarray((self.nz, self.nx, self.half_ny),
-                             dtype=self.complex,
-                             memptr=self.fields[0][1, 0, 0, 0].data),
-                  cp.ndarray((self.nz, self.nx, self.half_ny),
-                             dtype=self.complex,
-                             memptr=self.fields[1][1, 0, 0, 0].data),]
+                                dtype=self.complex,
+                                memptr=self.fields[0][1, 0, 0, 0].data),
+                     cp.ndarray((self.nz, self.nx, self.half_ny),
+                                dtype=self.complex,
+                                memptr=self.fields[1][1, 0, 0, 0].data),]
 
         # All fields and derivatives to be transformed to real space
         # are kept in one huge array (dft_derivatives).
@@ -116,7 +226,6 @@ class KREHMFourier(FourierSystem):
 
         # Check and set all physical parameters
         self._interpret_physical_parameters()
-        self._interpret_forcing_parameters()
 
     def _interpret_physical_parameters(self):
         """
@@ -177,56 +286,11 @@ class KREHMFourier(FourierSystem):
         self.de = de
         self.beta_over_mass_ratio = beta_over_mass_ratio
 
-    def _interpret_forcing_parameters(self):
-        """
-        Infers runtime parameters related to the various forcing methods 
-        specific to isothermal KREHM
-        """
-
-        # Nothing to do if not forcing
-        if not self.input["forcing.method"]:
-            return
-
-        # Elsasser forcing
-        if self.input["forcing.method"] == "elsasser":
-
-            # Alias parameters
-            energy_injection_rate = self.input["forcing.energy_injection_rate"]
-
-            if energy_injection_rate < 0.0:
-                raise InvalidFlucsInputFileError(
-                    "forcing.energy_injection_rate must be positive "
-                    "semi-definite."
-                )   
-            
-            injection_imbalance = self.input["forcing.injection_imbalance"]
-            if injection_imbalance < 0.0 or injection_imbalance > 1.0:
-                raise InvalidFlucsInputFileError(
-                    "forcing.injection_imbalance must be between 0 and 1."
-                )
-            
-            # Get plus and minus injection
-            self.forcing_epsilon_plus  = (
-                energy_injection_rate * (1 + injection_imbalance) / 2
-            )
-            self.forcing_epsilon_minus = (
-                energy_injection_rate * (1 - injection_imbalance) / 2
-            )
-
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels
         self.module_options.define_float("ZTE_OVER_TI", self.ZTe_over_Ti)
         self.module_options.define_float("RHOI2", self.rhoi**2)
         self.module_options.define_float("DE2", self.de**2)
-
-        # Forcing
-        if self.input["forcing.method"] == "elsasser":
-            self.module_options.define_float(
-                "FORCING_EPSILON_PLUS", self.forcing_epsilon_plus
-            )
-            self.module_options.define_float(
-                "FORCING_EPSILON_MINUS", self.forcing_epsilon_minus
-            )
 
         # Call this to compile the module
         super().compile_cupy_module()
