@@ -12,6 +12,7 @@ from cupy.cuda import cufft
 from flucs.diagnostic import FlucsDiagnostic
 from flucs.solvers.fourier.fourier_system import FourierSystem, FourierSystemForcing
 from flucs.input import InvalidFlucsInputFileError
+from flucs.utilities.messages import flucsprint
 
 from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
 from .krehm_fourier_forcing import KREHMFourierElsasserForcing
@@ -122,7 +123,15 @@ class KREHMFourier(FourierSystem):
         parameters and infers any implicit parameters.
 
         The default parameter values give the standard RMHD system
-        of equations.
+        of equations. Note that the only paramaters that appear in the evolved
+        equations are
+
+        self.ZTe_over_Ti
+        self.rhoi
+        self.de
+
+        All other parameters are to allow the user flexibility in how they 
+        specify the physical input parameters.
         """
 
         # Check positiveness of parameters
@@ -139,41 +148,67 @@ class KREHMFourier(FourierSystem):
         rhoi = self.input["parameters.rhoi"]
         de = self.input["parameters.de"]
 
-        beta_over_mass_ratio = self.input["parameters.beta_over_mass_ratio"]
+        betae_over_mass_ratio = self.input["parameters.betae_over_mass_ratio"]
 
-        # Handle finite beta parameters
-        if de >= 0.0 and beta_over_mass_ratio > 0.0:
+        # Equilibrium parameters
+        self.Ti_over_Te = Ti_over_Te
+        self.ion_charge = ion_charge
+
+        # Handle eRMHD limit
+        if self.input["parameters.eRMHD"]:
+            flucsprint(
+                "Running in electron RMHD limit, " \
+                "overriding lengthscale parameters.", 
+                source=self
+            )
+
+            # Override parameters with appropriate values
+            rhoi = 1e3
+            de = 0.0
+            betae_over_mass_ratio = np.inf
+
+            # Compute effective value of self.ZTe_over_Ti
+            betai = self.input["parameters.eRMHD_betai"]
+
+            ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
+
+            self.ZTe_over_Ti = (
+                  (ZTe_over_Ti - (betai * (1.0 + ZTe_over_Ti) / 2.0))
+                / (1.0         + (betai * (1.0 + ZTe_over_Ti) / 2.0))
+            )
+        else:
+            # Use the usual definition
+            self.ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
+
+        # Ion-scale parameters
+        self.rhoi = rhoi
+        self.rhos = np.sqrt(self.ion_charge / (2 * self.Ti_over_Te)) * self.rhoi
+
+        # Finite-electron-inertia parameters
+        if de >= 0.0 and betae_over_mass_ratio > 0.0:
             raise InvalidFlucsInputFileError(
                 "Only one of the parameters.de and "
-                "parameters.beta_over_mass_ratio should be specified."
+                "parameters.betae_over_mass_ratio should be specified."
             )
 
         if de == 0.0:
-            beta_over_mass_ratio = np.inf
+            betae_over_mass_ratio = np.inf
         elif de > 0.0:
-            beta_over_mass_ratio = (
+            betae_over_mass_ratio = (
                 (ion_charge**2 / Ti_over_Te) * (rhoi / de)**2
             )
-        elif beta_over_mass_ratio > 0.0:
+        elif betae_over_mass_ratio > 0.0:
             de = ion_charge * rhoi / np.sqrt(
-                Ti_over_Te * beta_over_mass_ratio
+                Ti_over_Te * betae_over_mass_ratio
             )
         else:
             raise InvalidFlucsInputFileError(
                 "Please specify at least one of parameters.de and "
-                "parameters.beta_over_mass_ratio."
+                "parameters.betae_over_mass_ratio."
             )
-
-        # Store final parameters
-        self.Ti_over_Te = Ti_over_Te
-        self.ion_charge = ion_charge
-        self.ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
-
-        self.rhoi = rhoi
-        self.rhos = np.sqrt(self.ion_charge / (2 * self.Ti_over_Te)) * self.rhoi
-
+        
         self.de = de
-        self.beta_over_mass_ratio = beta_over_mass_ratio
+        self.betae_over_mass_ratio = betae_over_mass_ratio
 
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels

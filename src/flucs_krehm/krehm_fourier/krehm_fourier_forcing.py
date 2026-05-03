@@ -1,7 +1,7 @@
 import numpy as np
 
 from flucs.input import InvalidFlucsInputFileError
-from flucs.solvers.fourier.fourier_system import FourierSystemForcing
+from flucs.solvers.fourier.fourier_system_forcing import FourierSystemForcing
 from flucs.utilities.messages import flucsprint
 
 
