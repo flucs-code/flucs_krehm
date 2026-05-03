@@ -157,7 +157,7 @@ class KREHMFourier(FourierSystem):
         # Handle eRMHD limit
         if self.input["parameters.eRMHD"]:
             flucsprint(
-                "Running in electron RMHD limit, " \
+                "Running in electron-RMHD limit, " \
                 "overriding lengthscale parameters.", 
                 source=self
             )

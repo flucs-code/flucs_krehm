@@ -35,8 +35,8 @@ class FreeEnergyDiag(FlucsDiagnostic):
 
     # Free energy kernels
     W_kzkx_kernel: cp.RawKernel
-    W_forcing_kzkx_kernel: cp.RawKernel
-    dWdt_kzkx_kernel: cp.RawKernel
+    dWdt_kzkx_kernel: cp.RawKernel  
+    dWdt_forcing_kzkx_kernel: cp.RawKernel
     dWdt_hyperdissipation_magnitude_kernels: dict[str, cp.RawKernel]
 
     # Thetap kernels
