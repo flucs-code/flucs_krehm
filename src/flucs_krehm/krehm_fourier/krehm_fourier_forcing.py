@@ -69,12 +69,13 @@ class KREHMFourierElsasserForcing(FourierSystemForcing):
         system._precompute_wavenumbers()
         kx, ky, kz = system.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
+        kz_abs = np.abs(kz)
 
         forced_modes_halfny = (
             (kperp2 > kperp_min**2)
             & (kperp2 < kperp_max**2)
-            & (kz > kz_min)
-            & (kz < kz_max)
+            & (kz_abs > kz_min)
+            & (kz_abs < kz_max)
         )
         ky0_modes = ky < 0.5 * ky[0, 0, 1]
 

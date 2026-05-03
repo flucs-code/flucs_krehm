@@ -323,14 +323,15 @@ void add_forcing_elsasser(
     const FLUCS_FLOAT kz = kz_from_ikz(ikz);
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+    const FLUCS_FLOAT kz_abs = flucs_fabs(kz);
 
     if (kperp2 == ((FLUCS_FLOAT)0.0))
         return;
     
     if (!(kperp2 > FORCING_KPERP2_MIN &&
           kperp2 < FORCING_KPERP2_MAX &&
-          kz > FORCING_KZ_MIN &&
-          kz < FORCING_KZ_MAX))
+          kz_abs > FORCING_KZ_MIN &&
+          kz_abs < FORCING_KZ_MAX))
         return;
 
     // Get fields and matrices
