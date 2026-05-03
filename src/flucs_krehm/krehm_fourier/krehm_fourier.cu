@@ -823,7 +823,7 @@ struct Helicity_Functor {
             phi.real() * apar.real() + phi.imag() * apar.imag()
         );
 
-        const FLUCS_FLOAT helicity = - ((FLUCS_FLOAT)2.0) * (
+        const FLUCS_FLOAT helicity = + ((FLUCS_FLOAT)2.0) * (
             one_minus_gamma0_over_alpha(kperp2) * kperp2 
             * (FLOAT_ONE + DE2 * kperp2) * cross_term
         );
@@ -856,7 +856,7 @@ struct HelicityForcing_Functor {
             apar.real() * forcing_terms[0].real() + apar.imag() * forcing_terms[0].imag()
         );
 
-        const FLUCS_FLOAT helicity = - ((FLUCS_FLOAT)2.0) * (
+        const FLUCS_FLOAT helicity = + ((FLUCS_FLOAT)2.0) * (
             one_minus_gamma0_over_alpha(kperp2) * kperp2 
             * (FLOAT_ONE + DE2 * kperp2) * cross_term
         );
