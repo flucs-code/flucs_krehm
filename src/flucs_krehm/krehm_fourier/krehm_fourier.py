@@ -285,14 +285,8 @@ class KREHMFourier(FourierSystem):
         ZTe_over_Ti = self.ZTe_over_Ti
 
         # Construct useful functions
-        alpha = 0.5 * (kperp2) * (rhoi**2)
-        gamma0 = i0e(alpha)
-        taubarinv = ZTe_over_Ti * (1.0 - gamma0)
-        one_minus_gamma0_over_alpha = np.divide(
-            1.0 - gamma0,
-            alpha,
-            out=np.ones_like(alpha),
-            where=(alpha != 0.0)
+        taubarinv, one_minus_gamma0_over_alpha = (
+            self.compute_ion_flr_terms(kperp2)
         )
 
         # phi-phi
@@ -310,3 +304,113 @@ class KREHMFourier(FourierSystem):
         linear_matrix[1, 1, :, :, :] = 0.0
 
         return linear_matrix
+
+    def compute_ion_flr_terms(
+            self, 
+            kperp2: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Computes the useful functions taubarinv and one_minus_gamma0_over_alpha
+        that appear in various places in the equations using CPU memory. 
+        """
+
+        # Construct functions
+        alpha = 0.5 * (kperp2) * (self.rhoi**2)
+        gamma0 = i0e(alpha)
+
+        taubarinv = self.ZTe_over_Ti * (1.0 - gamma0)
+
+        one_minus_gamma0_over_alpha = np.divide(
+            1.0 - gamma0,
+            alpha,
+            out=np.ones_like(alpha),
+            where=(alpha != 0.0)
+        )
+
+        return taubarinv, one_minus_gamma0_over_alpha
+
+    def compute_phase_velocity(
+            self,
+            kperp2: np.ndarray
+        ) -> np.ndarray:
+        """
+        Computes the phase velocity (normalised to the Alfven speed) using 
+        CPU memory.
+
+        """
+
+        # Get ion FLR functions
+        one_minus_gamma0_over_alpha = (self.compute_ion_flr_terms(kperp2))[1]
+        alpha = 0.5 * (kperp2) * (self.rhoi**2)
+
+        # Construct phase velocity
+        vphase = np.sqrt(
+            (self.ZTe_over_Ti * alpha + 1.0/one_minus_gamma0_over_alpha) /
+            (1.0 + kperp2 * self.de**2)  
+        )
+
+        return vphase
+
+    def compute_thetas_from_fields(
+            self, 
+            phi: np.ndarray, 
+            apar: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Given the Fourier-space fields, computes the corresponding Elsasser
+        potentials using CPU memory. 
+
+        """
+        # Construct wavenumbers
+        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kperp2 = kx**2 + ky**2
+
+        # Construct ion FLR functions
+        taubarinv, one_minus_gamma0_over_alpha = (
+            self.compute_ion_flr_terms(kperp2)
+        )
+
+        # Construct phase velocity
+        vphase = self.compute_phase_velocity(kperp2)
+
+        # Construct thetas
+        phi_factor = vphase * one_minus_gamma0_over_alpha
+
+        thetap = np.sqrt(1 + kperp2 * self.de**2) * (phi_factor * phi + apar)
+        thetam = np.sqrt(1 + kperp2 * self.de**2) * (phi_factor * phi - apar)
+
+        return thetap, thetam
+
+    def compute_fields_from_thetas(
+            self, 
+            thetap: np.ndarray, 
+            thetam: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Given the Fourier-space Elsasser potentials, computes the corresponding 
+        fields using CPU memory.
+
+        """
+        # Construct wavenumbers
+        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kperp2 = kx**2 + ky**2
+
+        # Construct ion FLR functions
+        taubarinv, one_minus_gamma0_over_alpha = (
+            self.compute_ion_flr_terms(kperp2)
+        )
+
+        # Construct phase velocity
+        vphase = self.compute_phase_velocity(kperp2)
+
+        # Construct fields
+        phi_factor = vphase * one_minus_gamma0_over_alpha
+
+        phi  = 0.5 * (thetap + thetam) / (
+            np.sqrt(1 + kperp2 * self.de**2) * phi_factor
+        )
+        apar = 0.5 * (thetap - thetam) / (
+            np.sqrt(1 + kperp2 * self.de**2)
+        )
+
+        return phi, apar
