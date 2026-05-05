@@ -210,6 +210,93 @@ class KREHMFourier(FourierSystem):
         self.de = de
         self.betae_over_mass_ratio = betae_over_mass_ratio
 
+    def _set_initial_conditions(self) -> None:
+        """
+        System-specific initial conditions go here
+        """
+
+        # Use restart data
+        if self.restart_manager.data is not None:
+            super()._set_initial_conditions()
+            return
+
+        # Handle known initialisation types
+        match self.input["init.method"]:
+
+            case "elsasser":
+                # Validate parameters
+                energy = self.input["init.energy"]
+                imbalance = self.input["init.imbalance"]
+
+                if energy <= 0.0:
+                    raise InvalidFlucsInputFileError(
+                        "init.energy must be positive."
+                    )
+                if (imbalance < -1.0) or (imbalance > +1.0):
+                    raise InvalidFlucsInputFileError(
+                        "init.imbalance must be between -1.0 and 1.0."
+                    )
+
+                # Target Elsasser energies
+                Wp_target = 0.5 * (1.0 + imbalance) * energy 
+                Wm_target = 0.5 * (1.0 - imbalance) * energy 
+
+                # Construct wavenumbers
+                kx, ky, kz = self.get_broadcast_wavenumbers()
+                kperp2 = kx**2 + ky**2
+
+                valid_kz = np.zeros_like(kz, dtype=bool)
+                valid_kz[+1, :, :] = True
+                valid_kz[-1, :, :] = True
+
+                # Envelope
+                envelope = (kperp2 ** self.input["init.power"]) * np.exp(
+                    -2.0 * (kperp2 / self.input["init.width"] ** 2)
+                )
+                envelope[~((kperp2 > 0.0) & valid_kz)] = 0.0
+
+                # Phase
+                random = np.random.default_rng(self.input["init.rand_seed"])
+                angle = random.uniform(
+                    0.0,
+                    2.0 * np.pi,
+                    size=self.half_unpadded_tuple,
+                )
+
+                # Construct base theta and apply reality condition
+                theta = (
+                    envelope * np.exp(1j * angle)
+                ).astype(self.complex)
+
+                theta_ky0 = np.fft.fftshift(theta[:, :, 0], axes=(0, 1))
+                theta_ky0 = 0.5 * (
+                    theta_ky0 + np.conj(theta_ky0[::-1, ::-1])
+                )
+                theta[:, :, 0] = np.fft.ifftshift(theta_ky0, axes=(0, 1))
+
+                # Compute energy of base theta
+                weight = np.ones((1, 1, self.half_ny), dtype=kperp2.dtype)
+                weight[..., 1:] = 2.0
+
+                W_theta = 0.5 * np.sum(
+                    weight * kperp2 * theta * np.conj(theta)
+                ).real
+
+                # Normalise to give the correct initial energy and imbalance
+                thetap = np.sqrt(Wp_target/W_theta) * theta
+                thetam = np.sqrt(Wm_target/W_theta) * theta
+
+                # Convert to evolved fields
+                phi, apar = self.compute_fields_from_thetas(thetap, thetam)
+
+                self.fields_initial = np.stack(
+                    (phi, apar), axis=0
+                ).astype(self.complex)
+
+            case _:
+                # Fallback to solver-side initial conditions
+                super()._set_initial_conditions()
+
     def compile_cupy_module(self) -> None:
         # System-specific constants for the kernels
         self.module_options.define_float("ZTE_OVER_TI", self.ZTe_over_Ti)
@@ -366,9 +453,7 @@ class KREHMFourier(FourierSystem):
         kperp2 = kx**2 + ky**2
 
         # Construct ion FLR functions
-        taubarinv, one_minus_gamma0_over_alpha = (
-            self.compute_ion_flr_terms(kperp2)
-        )
+        one_minus_gamma0_over_alpha = (self.compute_ion_flr_terms(kperp2))[1]
 
         # Construct phase velocity
         vphase = self.compute_phase_velocity(kperp2)

@@ -20,3 +20,11 @@ energy_injection_rate = 0.1
 injection_imbalance = 0.0
 range_kperp = [1.5, 2.5]
 range_kz = [0.5, 1.5]
+
+[init]
+
+# method = "elsasser"
+energy = 1e-3
+imbalance = 0.0
+power = 6.0
+width = 1.0
