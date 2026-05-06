@@ -15,11 +15,17 @@ eRMHD_betai = 0.0
 
 [forcing]
 
+# Generic wavenumber ranges
+range_kperp = [1.5, 2.5]
+range_kz = [0.5, 1.5]
+
 # method = "elsasser"
 energy_injection_rate = 0.1
 injection_imbalance = 0.0
-range_kperp = [1.5, 2.5]
-range_kz = [0.5, 1.5]
+
+# method = "meyrand"
+energy_injection_rate_phi = 0.1
+energy_injection_rate_apar = 0.1
 
 [init]
 

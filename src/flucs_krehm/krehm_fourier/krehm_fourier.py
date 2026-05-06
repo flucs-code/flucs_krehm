@@ -15,7 +15,10 @@ from flucs.input import InvalidFlucsInputFileError
 from flucs.utilities.messages import flucsprint
 
 from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
-from .krehm_fourier_forcing import KREHMFourierElsasserForcing
+from .krehm_fourier_forcing import (
+    KREHMFourierElsasserForcing,
+    KREHMFourierMeyrandForcing,
+)
 
 class KREHMFourier(FourierSystem):
     """
@@ -46,6 +49,7 @@ class KREHMFourier(FourierSystem):
     # Supported forcing
     system_forcing_methods: ClassVar[dict[str, FourierSystemForcing]] = {
         "elsasser": KREHMFourierElsasserForcing,
+        "meyrand": KREHMFourierMeyrandForcing,
     }
 
     def ready(self):
@@ -251,40 +255,46 @@ class KREHMFourier(FourierSystem):
 
                 # Envelope
                 envelope = (kperp2 ** self.input["init.power"]) * np.exp(
-                    -2.0 * (kperp2 / self.input["init.width"] ** 2)
+                    -2.0 * (kperp2 /  self.input["init.width"] ** 2)
                 )
                 envelope[~((kperp2 > 0.0) & valid_kz)] = 0.0
 
-                # Phase
-                random = np.random.default_rng(self.input["init.rand_seed"])
-                angle = random.uniform(
-                    0.0,
-                    2.0 * np.pi,
-                    size=self.half_unpadded_tuple,
-                )
-
-                # Construct base theta and apply reality condition
-                theta = (
-                    envelope * np.exp(1j * angle)
-                ).astype(self.complex)
-
-                theta_ky0 = np.fft.fftshift(theta[:, :, 0], axes=(0, 1))
-                theta_ky0 = 0.5 * (
-                    theta_ky0 + np.conj(theta_ky0[::-1, ::-1])
-                )
-                theta[:, :, 0] = np.fft.ifftshift(theta_ky0, axes=(0, 1))
-
-                # Compute energy of base theta
+                # Weight for wavenumbe summation
                 weight = np.ones((1, 1, self.half_ny), dtype=kperp2.dtype)
                 weight[..., 1:] = 2.0
 
-                W_theta = 0.5 * np.sum(
-                    weight * kperp2 * theta * np.conj(theta)
-                ).real
+                # Construct thetas with random phases
+                random = np.random.default_rng(self.input["init.rand_seed"])
+                thetas = []
 
-                # Normalise to give the correct initial energy and imbalance
-                thetap = np.sqrt(Wp_target/W_theta) * theta
-                thetam = np.sqrt(Wm_target/W_theta) * theta
+                for target in (Wp_target, Wm_target):
+                    # Base object
+                    theta = (
+                        envelope
+                        * np.exp(
+                            1j * random.uniform(
+                                0.0,
+                                2.0 * np.pi,
+                                size=self.half_unpadded_tuple,
+                            )
+                        )
+                    ).astype(self.complex)
+
+                    # Handle reality condition
+                    theta_ky0 = np.fft.fftshift(theta[:, :, 0], axes=(0, 1))
+                    theta_ky0 = 0.5 * (
+                        theta_ky0 + np.conj(theta_ky0[::-1, ::-1])
+                    )
+                    theta[:, :, 0] = np.fft.ifftshift(theta_ky0, axes=(0, 1))
+
+                    # Scale by free-energy contribution
+                    W_theta = 0.5 * np.sum(
+                        weight * kperp2 * theta * np.conj(theta)
+                    ).real
+                    thetas.append(np.sqrt(target / W_theta) * theta)
+
+                # Unpack thetas
+                thetap, thetam = thetas
 
                 # Convert to evolved fields
                 phi, apar = self.compute_fields_from_thetas(thetap, thetam)

@@ -379,6 +379,101 @@ void add_forcing_elsasser(
 }
 #endif
 
+#if defined(FORCING_METHOD_MEYRAND)
+__device__ __forceinline__
+void add_forcing_meyrand(
+    const size_t index,
+    const FLUCS_FLOAT dt,
+    const long long current_step,
+    const FLUCS_COMPLEX* previous_fields,
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT]
+)
+{
+    // Unused variables
+    (void)dt;
+    (void)current_step;
+
+    // Indices
+    indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+    const size_t ikx = indices.ikx;
+    const size_t iky = indices.iky;
+    const size_t ikz = indices.ikz;
+
+    // Wavenumbers 
+    const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+    const FLUCS_FLOAT ky = ky_from_iky(iky);
+    const FLUCS_FLOAT kz = kz_from_ikz(ikz);
+
+    const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+    const FLUCS_FLOAT kz_abs = flucs_fabs(kz);
+
+    if (kperp2 == ((FLUCS_FLOAT)0.0))
+        return;
+    
+    if (!(kperp2 > FORCING_KPERP2_MIN &&
+          kperp2 < FORCING_KPERP2_MAX &&
+          kz_abs > FORCING_KZ_MIN &&
+          kz_abs < FORCING_KZ_MAX))
+        return;
+
+    // Ion FLR functions
+    const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
+    const FLUCS_FLOAT taubarinv_factor = taubarinv(kperp2);
+    const FLUCS_FLOAT vphase = get_phase_velocity(kperp2, gamma_factor);
+
+    // Fields
+    const FLUCS_COMPLEX phi = previous_fields[index];
+    const FLUCS_COMPLEX apar = previous_fields[index + HALFUNPADDEDSIZE];
+
+    // Useful combinations of fields
+    const FLUCS_FLOAT phi2 = (
+        phi.real()*phi.real() + phi.imag()*phi.imag()
+    );
+    const FLUCS_FLOAT apar2 = (
+        apar.real()*apar.real() + apar.imag()*apar.imag()
+    );
+    const FLUCS_FLOAT real_phi_conj_apar = (
+        phi.real() * apar.real() + phi.imag() * apar.imag()
+    );
+    const FLUCS_FLOAT determinant = (
+        phi2 * apar2 - real_phi_conj_apar * real_phi_conj_apar
+    );
+
+    // Denominators
+    const FLUCS_FLOAT denominator_phi = (
+        2 * gamma_factor * kperp2 * (1 + taubarinv_factor) * determinant
+    );
+    const FLUCS_FLOAT denominator_apar = (
+        2 * gamma_factor * kperp2 * (1 + kperp2 * DE2    ) * determinant
+    );
+
+    // Matrix coefficients
+    const FLUCS_FLOAT m00 = (
+        + apar2 
+        - FORCING_IMBALANCE * gamma_factor * (vphase * vphase) * real_phi_conj_apar
+    ) / denominator_phi;
+
+    const FLUCS_FLOAT m01 = (
+        + FORCING_IMBALANCE * gamma_factor * (vphase * vphase) * phi2 
+        - real_phi_conj_apar
+    ) / denominator_phi;
+
+    const FLUCS_FLOAT m10 = (
+        + FORCING_IMBALANCE * apar2 
+        - gamma_factor * real_phi_conj_apar
+    ) / denominator_apar;
+
+    const FLUCS_FLOAT m11 = (
+        + gamma_factor * phi2 
+        - FORCING_IMBALANCE * real_phi_conj_apar
+    ) / denominator_apar;
+
+    // Construct forcing
+    explicit_terms[0] -= FORCING_EPSILON_PHI  * (m00 * phi + m01 * apar);
+    explicit_terms[1] -= FORCING_EPSILON_APAR * (m10 * phi + m11 * apar);
+}
+#endif
+
 __device__ void add_forcing_explicit(
     const size_t index,
     const FLUCS_FLOAT dt, 
@@ -390,6 +485,20 @@ __device__ void add_forcing_explicit(
         add_forcing_elsasser(
             index, dt, current_step, previous_fields, explicit_terms
         );
+    #endif
+
+    #if defined(FORCING_METHOD_MEYRAND)
+        add_forcing_meyrand(
+            index, dt, current_step, previous_fields, explicit_terms
+        );
+    #endif
+
+    #if !defined(FORCING)
+    (void)index;
+    (void)dt;
+    (void)current_step;
+    (void)previous_fields;
+    (void)explicit_terms;
     #endif
 }
 
@@ -405,9 +514,11 @@ struct FreeEnergy_Functor {
     const FLUCS_FLOAT multiplier;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
+        // Fields
         const FLUCS_COMPLEX phi = fields[index];
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
+        // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
         const size_t ikx = indices.ikx;
         const size_t iky = indices.iky;
@@ -416,6 +527,7 @@ struct FreeEnergy_Functor {
         const FLUCS_FLOAT ky = ky_from_iky(iky);
         const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
+        // Contributions
         const FLUCS_FLOAT phi_contribution = (
             (1 + taubarinv(kperp2)) * one_minus_gamma0_over_alpha(kperp2) * kperp2 
         ) * (phi.real() * phi.real() + phi.imag() * phi.imag());
@@ -433,12 +545,15 @@ struct FreeEnergyForcing_Functor {
     const FLUCS_FLOAT multiplier;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
+        // Fields
         const FLUCS_COMPLEX phi = fields[index];
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
-        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
 
-        add_forcing_elsasser(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+        // Forcing terms
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        add_forcing_explicit(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
 
+        // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
         const size_t ikx = indices.ikx;
         const size_t iky = indices.iky;
@@ -447,6 +562,7 @@ struct FreeEnergyForcing_Functor {
         const FLUCS_FLOAT ky = ky_from_iky(iky);
         const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
+        // Contributions
         const FLUCS_FLOAT phi_contribution = -2.0 * (
             (1 + taubarinv(kperp2)) * one_minus_gamma0_over_alpha(kperp2) * kperp2 
         ) * (phi.real() * forcing_terms[0].real() + phi.imag() * forcing_terms[0].imag());
@@ -808,9 +924,11 @@ struct Helicity_Functor {
     const FLUCS_FLOAT multiplier;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
+        // Fields
         const FLUCS_COMPLEX phi = fields[index];
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
+        // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
         const size_t ikx = indices.ikx;
         const size_t iky = indices.iky;
@@ -819,6 +937,7 @@ struct Helicity_Functor {
         const FLUCS_FLOAT ky = ky_from_iky(iky);
         const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
+        // Helicity
         const FLUCS_FLOAT cross_term = (
             phi.real() * apar.real() + phi.imag() * apar.imag()
         );
@@ -837,12 +956,15 @@ struct HelicityForcing_Functor {
     const FLUCS_FLOAT multiplier;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
+        // Fields
         const FLUCS_COMPLEX phi = fields[index];
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
-        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
 
-        add_forcing_elsasser(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+        // Forcing terms
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        add_forcing_explicit(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
 
+        // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
         const size_t ikx = indices.ikx;
         const size_t iky = indices.iky;
@@ -851,6 +973,7 @@ struct HelicityForcing_Functor {
         const FLUCS_FLOAT ky = ky_from_iky(iky);
         const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
+        // Helicity forcing
         const FLUCS_FLOAT cross_term = -(
             phi.real() * forcing_terms[1].real() + phi.imag() * forcing_terms[1].imag() +
             apar.real() * forcing_terms[0].real() + apar.imag() * forcing_terms[0].imag()
