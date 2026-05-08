@@ -167,6 +167,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
     def execute(self) -> None:
         # Useful aliases
         current_dt = self.system.float(self.system.current_dt)
+        adaptive_rate = self.system.float(self.system.adaptive_rate)
 
         fields = self.system.fields[
             self.system.current_step % self.system.fields_history_size
@@ -246,7 +247,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
             kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
-                (fields, current_dt, self.temp_zx),
+                (fields, adaptive_rate, self.temp_zx),
                 shared_mem=THREADS_PER_WARP * self.system.float().nbytes
             )
             self.real_last_axis_sum_nx_kernel(
@@ -321,7 +322,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 kernel(
                     (self.system.nx * self.system.nz,),
                     (BLOCK_SIZE,),
-                    (fields, current_dt, self.temp_zx),
+                    (fields, adaptive_rate, self.temp_zx),
                     shared_mem=THREADS_PER_WARP * self.system.float().nbytes
                 )
                 self.real_last_axis_sum_nx_kernel(
@@ -388,7 +389,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 kernel(
                     (self.system.nx * self.system.nz,),
                     (BLOCK_SIZE,),
-                    (fields, current_dt, self.temp_zx),
+                    (fields, adaptive_rate, self.temp_zx),
                     shared_mem=THREADS_PER_WARP * self.system.float().nbytes
                 )
                 self.real_last_axis_sum_nx_kernel(
@@ -595,6 +596,7 @@ class HelicityDiag(FlucsDiagnostic):
     def execute(self) -> None:
         # Useful aliases
         current_dt = self.system.float(self.system.current_dt)
+        adaptive_rate = self.system.float(self.system.adaptive_rate)
 
         fields = self.system.fields[
             self.system.current_step % self.system.fields_history_size
@@ -674,7 +676,7 @@ class HelicityDiag(FlucsDiagnostic):
             kernel(
                 (self.system.nx * self.system.nz,),
                 (BLOCK_SIZE,),
-                (fields, current_dt, self.temp_zx),
+                (fields, adaptive_rate, self.temp_zx),
                 shared_mem=THREADS_PER_WARP * self.system.float().nbytes
             )
             self.real_last_axis_sum_nx_kernel(
@@ -748,7 +750,7 @@ class HelicityDiag(FlucsDiagnostic):
                 kernel(
                     (self.system.nx * self.system.nz,),
                     (BLOCK_SIZE,),
-                    (fields, current_dt, self.temp_zx),
+                    (fields, adaptive_rate, self.temp_zx),
                     shared_mem=THREADS_PER_WARP * self.system.float().nbytes
                 )
                 self.real_last_axis_sum_nx_kernel(
@@ -815,7 +817,7 @@ class HelicityDiag(FlucsDiagnostic):
                 kernel(
                     (self.system.nx * self.system.nz,),
                     (BLOCK_SIZE,),
-                    (fields, current_dt, self.temp_zx),
+                    (fields, adaptive_rate, self.temp_zx),
                     shared_mem=THREADS_PER_WARP * self.system.float().nbytes
                 )
                 self.real_last_axis_sum_nx_kernel(

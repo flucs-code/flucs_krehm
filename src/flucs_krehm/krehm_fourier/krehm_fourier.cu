@@ -733,14 +733,14 @@ void dWmdt_kzkx(
 __global__
 void dWdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKx_Functor<FreeEnergy_Functor>{
-            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -748,14 +748,14 @@ void dWdt_hyperdissipation_kx_kzkx(
 __global__
 void dWpdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKx_Functor<FreeEnergyThetap_Functor>{
-            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -763,14 +763,14 @@ void dWpdt_hyperdissipation_kx_kzkx(
 __global__
 void dWmdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKx_Functor<FreeEnergyThetam_Functor>{
-            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -780,14 +780,14 @@ void dWmdt_hyperdissipation_kx_kzkx(
 __global__
 void dWdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKy_Functor<FreeEnergy_Functor>{
-            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -795,14 +795,14 @@ void dWdt_hyperdissipation_ky_kzkx(
 __global__
 void dWpdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKy_Functor<FreeEnergyThetap_Functor>{
-            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -810,14 +810,14 @@ void dWpdt_hyperdissipation_ky_kzkx(
 __global__
 void dWmdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKy_Functor<FreeEnergyThetam_Functor>{
-            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -827,14 +827,14 @@ void dWmdt_hyperdissipation_ky_kzkx(
 __global__
 void dWdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKz_Functor<FreeEnergy_Functor>{
-            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -842,14 +842,14 @@ void dWdt_hyperdissipation_kz_kzkx(
 __global__
 void dWpdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKz_Functor<FreeEnergyThetap_Functor>{
-            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -857,14 +857,14 @@ void dWpdt_hyperdissipation_kz_kzkx(
 __global__
 void dWmdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKz_Functor<FreeEnergyThetam_Functor>{
-            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -873,14 +873,14 @@ void dWmdt_hyperdissipation_kz_kzkx(
 __global__
 void dWdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationPerp_Functor<FreeEnergy_Functor>{
-            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergy_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -888,14 +888,14 @@ void dWdt_hyperdissipation_perp_kzkx(
 __global__
 void dWpdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationPerp_Functor<FreeEnergyThetap_Functor>{
-            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -903,14 +903,14 @@ void dWpdt_hyperdissipation_perp_kzkx(
 __global__
 void dWmdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationPerp_Functor<FreeEnergyThetam_Functor>{
-            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            FreeEnergyThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1136,14 +1136,14 @@ void dHmdt_kzkx(
 __global__
 void dHdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKx_Functor<Helicity_Functor>{
-            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1151,14 +1151,14 @@ void dHdt_hyperdissipation_kx_kzkx(
 __global__
 void dHpdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKx_Functor<HelicityThetap_Functor>{
-            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1166,14 +1166,14 @@ void dHpdt_hyperdissipation_kx_kzkx(
 __global__
 void dHmdt_hyperdissipation_kx_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKx_Functor<HelicityThetam_Functor>{
-            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1182,14 +1182,14 @@ void dHmdt_hyperdissipation_kx_kzkx(
 __global__
 void dHdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKy_Functor<Helicity_Functor>{
-            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1197,14 +1197,14 @@ void dHdt_hyperdissipation_ky_kzkx(
 __global__
 void dHpdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKy_Functor<HelicityThetap_Functor>{
-            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1212,14 +1212,14 @@ void dHpdt_hyperdissipation_ky_kzkx(
 __global__
 void dHmdt_hyperdissipation_ky_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKy_Functor<HelicityThetam_Functor>{
-            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1228,14 +1228,14 @@ void dHmdt_hyperdissipation_ky_kzkx(
 __global__
 void dHdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKz_Functor<Helicity_Functor>{
-            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1243,14 +1243,14 @@ void dHdt_hyperdissipation_kz_kzkx(
 __global__
 void dHpdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKz_Functor<HelicityThetap_Functor>{
-            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1258,14 +1258,14 @@ void dHpdt_hyperdissipation_kz_kzkx(
 __global__
 void dHmdt_hyperdissipation_kz_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationKz_Functor<HelicityThetam_Functor>{
-            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1274,14 +1274,14 @@ void dHmdt_hyperdissipation_kz_kzkx(
 __global__
 void dHdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationPerp_Functor<Helicity_Functor>{
-            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            Helicity_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1289,14 +1289,14 @@ void dHdt_hyperdissipation_perp_kzkx(
 __global__
 void dHpdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationPerp_Functor<HelicityThetap_Functor>{
-            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetap_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
@@ -1304,14 +1304,14 @@ void dHpdt_hyperdissipation_perp_kzkx(
 __global__
 void dHmdt_hyperdissipation_perp_kzkx(
     const FLUCS_COMPLEX* fields,
-    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT adaptive_rate,
     FLUCS_FLOAT* output
 ) {
     add_and_sum_last_axis<HALF_NY, true>(
         FLOAT_ONE,
         output,
         HyperdissipationPerp_Functor<HelicityThetam_Functor>{
-            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, dt
+            HelicityThetam_Functor{fields, (FLUCS_FLOAT)2.0}, adaptive_rate
         }
     );
 }
