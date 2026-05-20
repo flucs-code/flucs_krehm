@@ -242,8 +242,8 @@ class KREHMFourier(FourierSystem):
                     )
 
                 # Target Elsasser energies
-                Wp_target = 0.5 * (1.0 + imbalance) * energy 
-                Wm_target = 0.5 * (1.0 - imbalance) * energy 
+                Wp_target = 0.5 * (1.0 + imbalance) * energy
+                Wm_target = 0.5 * (1.0 - imbalance) * energy
 
                 # Construct wavenumbers
                 kx, ky, kz = self.get_broadcast_wavenumbers()
@@ -281,11 +281,19 @@ class KREHMFourier(FourierSystem):
                     ).astype(self.complex)
 
                     # Handle reality condition
-                    theta_ky0 = np.fft.fftshift(theta[:, :, 0], axes=(0, 1))
-                    theta_ky0 = 0.5 * (
-                        theta_ky0 + np.conj(theta_ky0[::-1, ::-1])
+                    theta_ky0 = theta[:, :, 0]
+                    theta_ky0[0, 0] = 0  # should be zero already
+                    theta_ky0[0, self.half_nx:] = np.conj(
+                        theta_ky0[0, 1:self.half_nx][::-1]
                     )
-                    theta[:, :, 0] = np.fft.ifftshift(theta_ky0, axes=(0, 1))
+                    theta_ky0[self.half_nz:, 0] = np.conj(
+                        theta_ky0[1:self.half_nz, 0][::-1]
+                    )
+                    theta_ky0[self.half_nz:, 1:] = np.conj(
+                        theta_ky0[1:self.half_nz, 1:][::-1, ::-1]
+                    )
+
+                    theta[:, :, 0] = theta_ky0[:, :]
 
                     # Scale by free-energy contribution
                     W_theta = 0.5 * np.sum(
@@ -322,6 +330,10 @@ class KREHMFourier(FourierSystem):
 
         self.find_nonlinear_bits_kernel =\
             self.cupy_module.get_function("find_nonlinear_bits")
+
+        # Uncomment to test, DELETE BEFORE MERGING INTO MAIN
+        # self.compare_forcing_kernel =\
+        #     self.cupy_module.get_function("compare_forcing")
 
     def begin_time_step(self) -> None:
         # Do anything model-specific here, then call the parent's method
@@ -360,6 +372,27 @@ class KREHMFourier(FourierSystem):
 
     def finish_time_step(self) -> None:
         super().finish_time_step()
+
+        # Uncomment to test, DELETE BEFORE MERGING INTO MAIN
+        # output1 = cp.zeros(self.fields[0].shape, dtype=self.complex)
+        # output2 = cp.zeros(self.fields[0].shape, dtype=self.complex)
+        #
+        # self.compare_forcing_kernel(
+        #     (self.half_unpadded_cuda_grid_size,),
+        #     (self.cuda_block_size,),
+        #     (
+        #         self.fields[self.current_step % self.fields_history_size],
+        #         output1, output2
+        #     ),
+        # )
+        #
+        # print(cp.max(cp.abs(output1)))
+        # print(cp.nanmax(cp.abs((output1 - output2) / output1)))
+        # print()
+        # print(cp.max(cp.abs(self.fields[self.current_step % self.fields_history_size])))
+
+        # exit(0)
+
 
     def compute_linear_matrix_reference(self) -> np.ndarray:
         # Initialise linear matrix
