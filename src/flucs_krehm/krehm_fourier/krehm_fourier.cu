@@ -135,8 +135,23 @@ __global__ void find_nonlinear_bits(
         ? real_derivatives_and_bits[real_index + PADDEDSIZE]
         : (FLUCS_FLOAT)0;
 
-    const FLUCS_FLOAT cfl = flucs_fabs(dxphi) * (NY / LY)
+    const FLUCS_FLOAT dxapar = in_bounds
+        ? real_derivatives_and_bits[real_index + 2*PADDEDSIZE]
+        : (FLUCS_FLOAT)0;
+    const FLUCS_FLOAT dyapar = in_bounds
+        ? real_derivatives_and_bits[real_index + 3*PADDEDSIZE]
+        : (FLUCS_FLOAT)0;
+
+    const FLUCS_FLOAT cfl_phi = flucs_fabs(dxphi) * (NY / LY)
         + flucs_fabs(dyphi) * (NX / LX);
+
+    const FLUCS_FLOAT cfl_apar = flucs_fabs(dxapar) * (NY / LY)
+        + flucs_fabs(dyapar) * (NX / LX);
+
+    // This works fine for de = 0, but we might need to 
+    // include a higher-order perp derivative in CFL
+    // when running with finite de
+    const FLUCS_FLOAT cfl = cfl_phi + cfl_apar;
 
     // Find max CFL using shared memory
     // TODO: Could we speed this up by reducing over warps?
@@ -160,8 +175,6 @@ __global__ void find_nonlinear_bits(
     if (!in_bounds)
         return;
 
-    const FLUCS_FLOAT dxapar = real_derivatives_and_bits[real_index + 2*PADDEDSIZE];
-    const FLUCS_FLOAT dyapar = real_derivatives_and_bits[real_index + 3*PADDEDSIZE];
     const FLUCS_FLOAT one_minus_gamma0_over_alpha_kperp2phi = real_derivatives_and_bits[real_index + 4*PADDEDSIZE];
     const FLUCS_FLOAT kperp2apar = real_derivatives_and_bits[real_index + 5*PADDEDSIZE];
 
@@ -377,11 +390,13 @@ void add_forcing_elsasser(
         )
     );
 }
-#endif
+#endif // FORCING_METHOD_ELSASSER
 
 #if defined(FORCING_METHOD_MEYRAND)
+// This is Toby's original implementation, which I tried improving below.
+// Kept here for benchmarking/comparisons, can always remove later.
 __device__ __forceinline__
-void add_forcing_meyrand(
+void add_forcing_meyrand_first_implementation(
     const size_t index,
     const FLUCS_FLOAT dt,
     const long long current_step,
@@ -472,7 +487,99 @@ void add_forcing_meyrand(
     explicit_terms[0] -= FORCING_EPSILON_PHI  * (m00 * phi + m01 * apar);
     explicit_terms[1] -= FORCING_EPSILON_APAR * (m10 * phi + m11 * apar);
 }
-#endif
+
+// Implementation of Romain's forcing idea where we force
+// phi and A with the correct imbalance independently.
+__device__ __forceinline__
+void add_forcing_meyrand(
+    const size_t index,
+    const FLUCS_FLOAT dt,
+    const long long current_step,
+    const FLUCS_COMPLEX* previous_fields,
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT]
+)
+{
+    // Unused variables
+    (void)dt;
+    (void)current_step;
+
+    // Indices
+    indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+    const size_t ikx = indices.ikx;
+    const size_t iky = indices.iky;
+    const size_t ikz = indices.ikz;
+
+    // Wavenumbers 
+    const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+    const FLUCS_FLOAT ky = ky_from_iky(iky);
+    const FLUCS_FLOAT kz = kz_from_ikz(ikz);
+
+    const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+    const FLUCS_FLOAT one_plus_kperp2de2 = FLOAT_ONE + kperp2 * DE2;
+    const FLUCS_FLOAT kz_abs = flucs_fabs(kz);
+
+    if (kperp2 == ((FLUCS_FLOAT)0.0))
+        return;
+    
+    if (!(kperp2 > FORCING_KPERP2_MIN &&
+          kperp2 < FORCING_KPERP2_MAX &&
+          kz_abs > FORCING_KZ_MIN &&
+          kz_abs < FORCING_KZ_MAX))
+        return;
+
+    // Various factors that appear in the terms below
+    const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
+    const FLUCS_FLOAT one_plus_taubarinv = FLOAT_ONE + taubarinv(kperp2);
+    const FLUCS_FLOAT taubarinv_over_kperp2de2_factor = one_plus_taubarinv / one_plus_kperp2de2;
+    const FLUCS_FLOAT helicity_prefactor = 2 * gamma_factor * kperp2 * one_plus_kperp2de2;
+
+    // Fields
+    const FLUCS_COMPLEX phi = previous_fields[index];
+    const FLUCS_COMPLEX apar = previous_fields[index + HALFUNPADDEDSIZE];
+
+    // Useful combinations of fields
+    const FLUCS_FLOAT phi2 = (
+        phi.real()*phi.real() + phi.imag()*phi.imag()
+    );
+    const FLUCS_FLOAT apar2 = (
+        apar.real()*apar.real() + apar.imag()*apar.imag()
+    );
+    const FLUCS_FLOAT real_phi_conj_apar = (
+        phi.real() * apar.real() + phi.imag() * apar.imag()
+    );
+
+    const FLUCS_FLOAT a00 = helicity_prefactor * apar2;
+    const FLUCS_FLOAT a10 = -helicity_prefactor * real_phi_conj_apar;
+    const FLUCS_FLOAT a01 = taubarinv_over_kperp2de2_factor * a10;
+    const FLUCS_FLOAT a11 = helicity_prefactor * taubarinv_over_kperp2de2_factor * phi2;
+
+    const FLUCS_FLOAT det = a00 * a11 - a10 * a01;
+
+    // Might be nice to have a system-wide eps, but this is also fine
+    constexpr FLUCS_FLOAT eps = (FLUCS_FLOAT)1e-12;
+    if (flucs_fabs(det) < eps * (
+            a00*a00 + a01*a01 + a10*a10 + a11*a11
+        )
+    ) {
+        // Don't do anything if det is too small
+        // __trap();  // useful for debugging
+        return;
+    }
+
+    const FLUCS_FLOAT inv_det = FLOAT_ONE / det;
+
+    // Forcing matrix
+    const FLUCS_FLOAT m00 = (a00 + FORCING_IMBALANCE * a01) * inv_det;
+    const FLUCS_FLOAT m01 = (a10 + FORCING_IMBALANCE * a11) * inv_det;
+
+    const FLUCS_FLOAT m10 = (FORCING_IMBALANCE * a00 * taubarinv_over_kperp2de2_factor + a01 * gamma_factor) * inv_det;
+    const FLUCS_FLOAT m11 = (FORCING_IMBALANCE * a10 * taubarinv_over_kperp2de2_factor + a11 * gamma_factor) * inv_det;
+
+    // Construct forcing
+    explicit_terms[0] -= FORCING_EPSILON_PHI  * (m00 * phi + m01 * apar);
+    explicit_terms[1] -= FORCING_EPSILON_APAR * (m10 * phi + m11 * apar);
+}
+#endif // FORCING_METHOD_MEYRAND
 
 __device__ void add_forcing_explicit(
     const size_t index,
@@ -492,17 +599,39 @@ __device__ void add_forcing_explicit(
             index, dt, current_step, previous_fields, explicit_terms
         );
     #endif
-
-    #if !defined(FORCING)
-    (void)index;
-    (void)dt;
-    (void)current_step;
-    (void)previous_fields;
-    (void)explicit_terms;
-    #endif
 }
 
-#endif
+// Used for comparing the two forcing implementations above
+// Should delete before merging into main.
+__global__ void compare_forcing(FLUCS_COMPLEX* previous_fields, FLUCS_COMPLEX* output1, FLUCS_COMPLEX* output2) {
+    const size_t index = blockDim.x * blockIdx.x + threadIdx.x;
+
+    // Check if we are within bounds
+    if (!(index < HALFUNPADDEDSIZE))
+        return;
+
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+
+    add_forcing_meyrand(
+        index, 0, 0, previous_fields, explicit_terms
+    );
+
+    output1[index] = explicit_terms[0];
+    output1[index + HALFUNPADDEDSIZE] = explicit_terms[1];
+
+    explicit_terms[0] = (FLUCS_COMPLEX)(0);
+    explicit_terms[1] = (FLUCS_COMPLEX)(0);
+
+    add_forcing_meyrand_first_implementation(
+        index, 0, 0, previous_fields, explicit_terms
+    );
+
+    output2[index] = explicit_terms[0];
+    output2[index + HALFUNPADDEDSIZE] = explicit_terms[1];
+}
+
+
+#endif // FORCING
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -551,7 +680,9 @@ struct FreeEnergyForcing_Functor {
 
         // Forcing terms
         FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+#ifdef FORCING_EXPLICIT
         add_forcing_explicit(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+#endif
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -962,7 +1093,9 @@ struct HelicityForcing_Functor {
 
         // Forcing terms
         FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+#ifdef FORCING_EXPLICIT
         add_forcing_explicit(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+#endif
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
