@@ -331,10 +331,6 @@ class KREHMFourier(FourierSystem):
         self.find_nonlinear_bits_kernel =\
             self.cupy_module.get_function("find_nonlinear_bits")
 
-        # Uncomment to test, DELETE BEFORE MERGING INTO MAIN
-        # self.compare_forcing_kernel =\
-        #     self.cupy_module.get_function("compare_forcing")
-
     def begin_time_step(self) -> None:
         # Do anything model-specific here, then call the parent's method
         super().begin_time_step()
@@ -372,26 +368,6 @@ class KREHMFourier(FourierSystem):
 
     def finish_time_step(self) -> None:
         super().finish_time_step()
-
-        # Uncomment to test, DELETE BEFORE MERGING INTO MAIN
-        # output1 = cp.zeros(self.fields[0].shape, dtype=self.complex)
-        # output2 = cp.zeros(self.fields[0].shape, dtype=self.complex)
-        #
-        # self.compare_forcing_kernel(
-        #     (self.half_unpadded_cuda_grid_size,),
-        #     (self.cuda_block_size,),
-        #     (
-        #         self.fields[self.current_step % self.fields_history_size],
-        #         output1, output2
-        #     ),
-        # )
-        #
-        # print(cp.max(cp.abs(output1)))
-        # print(cp.nanmax(cp.abs((output1 - output2) / output1)))
-        # print()
-        # print(cp.max(cp.abs(self.fields[self.current_step % self.fields_history_size])))
-
-        # exit(0)
 
 
     def compute_linear_matrix_reference(self) -> np.ndarray:
