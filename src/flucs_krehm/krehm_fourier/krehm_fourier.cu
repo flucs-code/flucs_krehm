@@ -541,6 +541,86 @@ struct FreeEnergy_Functor {
     }
 };
 
+struct FreeEnergyUperp_Functor {
+    const FLUCS_COMPLEX* fields;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Field
+        const FLUCS_COMPLEX phi = fields[index];
+
+        // Indices and wavenumbers
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Result
+        return one_minus_gamma0_over_alpha(kperp2) * kperp2 * (
+            phi.real()*phi.real() + phi.imag()*phi.imag()
+        );
+    }
+};
+
+struct FreeEnergyDens_Functor {
+    const FLUCS_COMPLEX* fields;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Field
+        const FLUCS_COMPLEX phi = fields[index];
+
+        // Indices and wavenumbers
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Result
+        return taubarinv(kperp2) * one_minus_gamma0_over_alpha(kperp2) 
+            * kperp2 * (phi.real()*phi.real() + phi.imag()*phi.imag());
+    }
+};
+
+struct FreeEnergyBperp_Functor {
+    const FLUCS_COMPLEX* fields;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Field
+        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+
+        // Indices and wavenumbers
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Result
+        return kperp2 * (apar.real()*apar.real() + apar.imag()*apar.imag());
+    }
+};
+
+struct FreeEnergyUpar_Functor {
+    const FLUCS_COMPLEX* fields;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Field
+        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+
+        // Indices and wavenumbers
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+        
+        // Result
+        return DE2 * kperp2 * kperp2 * (
+            apar.real()*apar.real() + apar.imag()*apar.imag()
+        );
+    }
+};
+
 struct FreeEnergyForcing_Functor {
     const FLUCS_COMPLEX* fields;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -691,6 +771,68 @@ struct Helicity_Functor {
         const FLUCS_FLOAT helicity = + ((FLUCS_FLOAT)2.0) * (
             one_minus_gamma0_over_alpha(kperp2) * kperp2 
             * (FLOAT_ONE + DE2 * kperp2) * cross_term
+        );
+
+        return helicity;
+    }
+};
+
+struct HelicityApar_Functor {
+    const FLUCS_COMPLEX* fields;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Fields
+        const FLUCS_COMPLEX phi = fields[index];
+        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+
+        // Indices and wavenumbers
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const size_t ikx = indices.ikx;
+        const size_t iky = indices.iky;
+
+        const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Helicity
+        const FLUCS_FLOAT cross_term = (
+            phi.real() * apar.real() + phi.imag() * apar.imag()
+        );
+
+        const FLUCS_FLOAT helicity = + ((FLUCS_FLOAT)2.0) * (
+            one_minus_gamma0_over_alpha(kperp2) * kperp2 
+            * FLOAT_ONE * cross_term
+        );
+
+        return helicity;
+    }
+};
+
+struct HelicityUpar_Functor {
+    const FLUCS_COMPLEX* fields;
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Fields
+        const FLUCS_COMPLEX phi = fields[index];
+        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+
+        // Indices and wavenumbers
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const size_t ikx = indices.ikx;
+        const size_t iky = indices.iky;
+
+        const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Helicity
+        const FLUCS_FLOAT cross_term = (
+            phi.real() * apar.real() + phi.imag() * apar.imag()
+        );
+
+        const FLUCS_FLOAT helicity = + ((FLUCS_FLOAT)2.0) * (
+            one_minus_gamma0_over_alpha(kperp2) * kperp2 
+            * DE2 * kperp2 * cross_term
         );
 
         return helicity;

@@ -21,12 +21,18 @@ class FreeEnergyDiag(FlucsDiagnostic):
     name = "free_energy"
     system: KREHMFourier
     option_defaults: ClassVar[dict[str, object]] = {
-        "save_elsasser": False
+        "save_contributions": False,
+        "save_elsasser": False,
     }
 
     get_W: Callable[..., cp.ndarray]
     get_dWdt_forcing: Callable[..., cp.ndarray]
     get_dWdt_hyperdissipation: Callable[..., cp.ndarray]
+
+    get_W_uperp: Callable[..., cp.ndarray]
+    get_W_dens: Callable[..., cp.ndarray]
+    get_W_bperp: Callable[..., cp.ndarray]
+    get_W_upar: Callable[..., cp.ndarray]
 
     get_Wp: Callable[..., cp.ndarray]
     get_dWpdt_hyperdissipation: Callable[..., cp.ndarray]
@@ -37,7 +43,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
     def init_vars(self) -> None:
         # Add variables for free energy and its time derivative
         for name in ["W", "dWdt_forcing", "dWdt", "dWdt_error"]:
-             self.add_var(FlucsDiagnosticVariable(
+            self.add_var(FlucsDiagnosticVariable(
                 name=name,
                 shape=(),
                 dimensions={},
@@ -73,11 +79,39 @@ class FreeEnergyDiag(FlucsDiagnostic):
             complex_output=False,
         )
 
+        # Add contributions diagnostics
+        if self.save_contributions:
+            # Add variables
+            for name in ["W_uperp", "W_dens", "W_bperp", "W_upar"]:
+                self.add_var(FlucsDiagnosticVariable(
+                    name=name,
+                    shape=(),
+                    dimensions={},
+                    is_complex=False,
+                ))
+
+            # Register reductions
+            self.get_W_uperp = reduce_unpadded_to_scalar(
+                self.system, "FreeEnergyUperp_Functor", "FLUCS_COMPLEX*", False
+            )
+
+            self.get_W_dens = reduce_unpadded_to_scalar(
+                self.system, "FreeEnergyDens_Functor", "FLUCS_COMPLEX*", False
+            )
+
+            self.get_W_bperp = reduce_unpadded_to_scalar(
+                self.system, "FreeEnergyBperp_Functor", "FLUCS_COMPLEX*", False
+            )
+
+            self.get_W_upar = reduce_unpadded_to_scalar(
+                self.system, "FreeEnergyUpar_Functor", "FLUCS_COMPLEX*", False
+            )
+
         # Add elsasser diagnostics
         if self.save_elsasser:
 
             for name in ["Wp", "Wm", "dWpdt", "dWmdt"]:
-                 self.add_var(FlucsDiagnosticVariable(
+                self.add_var(FlucsDiagnosticVariable(
                     name=name,
                     shape=(),
                     dimensions={},
@@ -171,6 +205,21 @@ class FreeEnergyDiag(FlucsDiagnostic):
             dWdt - dWdt_forcing - dWdt_hyperdissipation_total,
         )
 
+        # Saving contributions if required
+        if self.save_contributions:
+            
+            # (delta u_perp)**2
+            self.save_data("W_uperp", self.get_W_uperp(fields).get().item())
+
+            # (delta n_e)**2
+            self.save_data("W_density", self.get_W_dens(fields).get().item())
+
+            # (delta b_perp)**2
+            self.save_data("W_bperp", self.get_W_bperp(fields).get().item())
+
+            # (delta u_parallel)**2
+            self.save_data("W_upar", self.get_W_upar(fields).get().item())
+
         # Saving elsasser fields if required
         if self.save_elsasser:
 
@@ -222,12 +271,16 @@ class HelicityDiag(FlucsDiagnostic):
     name = "helicity"
     system: KREHMFourier
     option_defaults: ClassVar[dict[str, object]] = {
+        "save_contributions": False,
         "save_elsasser": False
     }
 
     get_H: Callable[..., cp.ndarray]
     get_dHdt_forcing: Callable[..., cp.ndarray]
     get_dHdt_hyperdissipation: Callable[..., cp.ndarray]
+
+    get_H_apar: Callable[..., cp.ndarray]
+    get_H_upar: Callable[..., cp.ndarray]
 
     get_Hp: Callable[..., cp.ndarray]
     get_dHpdt_hyperdissipation: Callable[..., cp.ndarray]
@@ -291,6 +344,26 @@ class HelicityDiag(FlucsDiagnostic):
             input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
             complex_output=False,
         )
+
+        # Add contributions diagnostics
+        if self.save_contributions:
+            # Add variables
+            for name in ["H_apar", "H_upar"]:
+                self.add_var(FlucsDiagnosticVariable(
+                    name=name,
+                    shape=(),
+                    dimensions={},
+                    is_complex=False,
+                ))
+
+            # Register reductions
+            self.get_H_apar = reduce_unpadded_to_scalar(
+                self.system, "HelicityApar_Functor", "FLUCS_COMPLEX*", False
+            )
+
+            self.get_H_upar = reduce_unpadded_to_scalar(
+                self.system, "HelicityUpar_Functor", "FLUCS_COMPLEX*", False
+            )
 
         # Add elsasser diagnostics
         if self.save_elsasser:
@@ -406,6 +479,15 @@ class HelicityDiag(FlucsDiagnostic):
             dHdt - dHdt_forcing - dHdt_hyperdissipation_total,
         )
 
+        # Saving contributions if required
+        if self.save_contributions:
+            
+            # (delta n_e) * apar
+            self.save_data("H_apar", self.get_H_apar(fields).get().item())
+
+            # (delta n_e) * upar
+            self.save_data("H_upar", self.get_H_upar(fields).get().item())
+
         # Saving elsasser fields if required
         if self.save_elsasser:
 
@@ -416,7 +498,7 @@ class HelicityDiag(FlucsDiagnostic):
             # dHpdt
             Hp_prev = self.get_Hp(fields_prev)
             dHpdt = (Hp - Hp_prev.get().item()) / current_dt
-            self.save_data("dHpdt",dHpdt)
+            self.save_data("dHpdt", dHpdt)
 
             # dHpdt_hyperdissipation
             for index, component in enumerate(self.system.hyperdissipation_components):
@@ -435,7 +517,7 @@ class HelicityDiag(FlucsDiagnostic):
             # dHmdt
             Hm_prev = self.get_Hm(fields_prev)
             dHmdt = (Hm - Hm_prev.get().item()) / current_dt
-            self.save_data("dHmdt",dHmdt)
+            self.save_data("dHmdt", dHmdt)
 
             # dHmdt_hyperdissipation
             for index, component in enumerate(self.system.hyperdissipation_components):
