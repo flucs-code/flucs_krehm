@@ -549,3 +549,256 @@ class HelicityDiag(FlucsDiagnostic):
                     f"dHmdt_hyperdissipation_{component}",
                     -result.get().item(),
                 )
+
+
+class FreeEnergyDiag1D(FlucsDiagnostic):
+    """
+    Computes 1D spectra of KREHM free-energy quantities and budget terms.
+    """
+
+    name = "free_energy_1d"
+    system: KREHMFourier
+    option_defaults: ClassVar[dict[str, object]] = {
+        "spectra": ["kperp"],
+        "save_contributions": False,
+        "save_elsasser": False,
+    }
+
+    get_W: dict[str, Callable[..., cp.ndarray]]
+    get_dWdt_forcing: dict[str, Callable[..., cp.ndarray]]
+    get_dWdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    get_W_uperp: dict[str, Callable[..., cp.ndarray]]
+    get_W_dens: dict[str, Callable[..., cp.ndarray]]
+    get_W_bperp: dict[str, Callable[..., cp.ndarray]]
+    get_W_upar: dict[str, Callable[..., cp.ndarray]]
+
+    get_Wp: dict[str, Callable[..., cp.ndarray]]
+    get_dWpdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+    get_Wm: dict[str, Callable[..., cp.ndarray]]
+    get_dWmdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    def init_vars(self) -> None:
+        reductions = FourierReductions(self.system)
+
+        # Parse valid spectra (enforce 1D)
+        valid_spectra = ("kz", "kx", "ky", "kperp")
+        spectra = self.spectra
+        if isinstance(spectra, str):
+            spectra = [spectra]
+        spectra = tuple(dict.fromkeys(spectra))
+
+        invalid_spectra = set(spectra) - set(valid_spectra)
+        if invalid_spectra:
+            raise ValueError(
+                f"{self.name} only supports 1D spectra {valid_spectra}; "
+                f"got {sorted(invalid_spectra)}."
+            )
+
+        # Initialise dicts
+        self.get_W = {}
+        self.get_dWdt_forcing = {}
+        self.get_dWdt_hyperdissipation = {}
+
+        self.get_W_uperp = {}
+        self.get_W_dens = {}
+        self.get_W_bperp = {}
+        self.get_W_upar = {}
+
+        self.get_Wp = {}
+        self.get_dWpdt_hyperdissipation = {}
+        self.get_Wm = {}
+        self.get_dWmdt_hyperdissipation = {}
+
+        # Iterate over spectra types and init variables
+        for spectrum in spectra:
+            dimensions = reductions.get_dimensions(spectrum)
+            shape = tuple(dimensions)
+
+            for name in ["W", "dWdt_forcing"]:
+                self.add_var(FlucsDiagnosticVariable(
+                    name=f"{name}_{spectrum}",
+                    shape=shape,
+                    dimensions=dimensions,
+                    is_complex=False,
+                ))
+
+            for component in self.system.hyperdissipation_components:
+                self.add_var(FlucsDiagnosticVariable(
+                    name=f"dWdt_hyperdissipation_{component}_{spectrum}",
+                    shape=shape,
+                    dimensions=dimensions,
+                    is_complex=False,
+                ))
+
+            self.get_W[spectrum] = reductions.get_reduction(
+                reduction_output=spectrum,
+                functor="FreeEnergy_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False,
+            )
+            self.get_dWdt_forcing[spectrum] = reductions.get_reduction(
+                reduction_output=spectrum,
+                functor="FreeEnergyForcing_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False,
+            )
+            self.get_dWdt_hyperdissipation[spectrum] = reductions.get_reduction(
+                reduction_output=spectrum,
+                functor="FreeEnergyHyperdissipation_Functor",
+                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
+                complex_output=False,
+            )
+
+            # Save contributions if required
+            if self.save_contributions:
+                for name in ["W_uperp", "W_dens", "W_bperp", "W_upar"]:
+                    self.add_var(FlucsDiagnosticVariable(
+                        name=f"{name}_{spectrum}",
+                        shape=shape,
+                        dimensions=dimensions,
+                        is_complex=False,
+                    ))
+
+                self.get_W_uperp[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyUperp_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False
+                )
+                self.get_W_dens[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyDens_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False
+                )
+                self.get_W_bperp[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyBperp_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False
+                )
+                self.get_W_upar[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyUpar_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False
+                )
+
+            # Save Elsasser contributions if required
+            if self.save_elsasser:
+                for name in ["Wp", "Wm"]:
+                    self.add_var(FlucsDiagnosticVariable(
+                        name=f"{name}_{spectrum}",
+                        shape=shape,
+                        dimensions=dimensions,
+                        is_complex=False,
+                    ))
+
+                for component in self.system.hyperdissipation_components:
+                    for name in ["dWpdt", "dWmdt"]:
+                        self.add_var(FlucsDiagnosticVariable(
+                            name=f"{name}_hyperdissipation_{component}_{spectrum}",
+                            shape=shape,
+                            dimensions=dimensions,
+                            is_complex=False,
+                        ))
+
+                self.get_Wp[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyThetap_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False
+                )
+                self.get_dWpdt_hyperdissipation[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyThetapHyperdissipation_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
+                    complex_output=False,
+                )
+                self.get_Wm[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyThetam_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False
+                )
+                self.get_dWmdt_hyperdissipation[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyThetamHyperdissipation_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
+                    complex_output=False,
+                )
+
+    def ready(self) -> None:
+        pass
+
+    def execute(self) -> None:
+        adaptive_rate = self.system.float(self.system.adaptive_rate)
+        fields = self.system.fields[
+            self.system.current_step % self.system.fields_history_size
+        ]
+
+        # Iterate over spectra to save
+        for spectrum in self.get_W:
+
+            # Save raw spectra
+            self.save_data(
+                f"W_{spectrum}", self.get_W[spectrum](fields).get()
+            )
+            self.save_data(
+                f"dWdt_forcing_{spectrum}",
+                self.get_dWdt_forcing[spectrum](fields).get(),
+            )
+
+            for index, component in enumerate(self.system.hyperdissipation_components):
+                result = self.get_dWdt_hyperdissipation[spectrum](
+                    fields, adaptive_rate, index
+                )
+                self.save_data(
+                    f"dWdt_hyperdissipation_{component}_{spectrum}",
+                    -result.get(),
+                )
+
+            if self.save_contributions:
+                self.save_data(
+                    f"W_uperp_{spectrum}", 
+                    self.get_W_uperp[spectrum](fields).get()
+                )
+                self.save_data(
+                    f"W_dens_{spectrum}", 
+                    self.get_W_dens[spectrum](fields).get()
+                )
+                self.save_data(
+                    f"W_bperp_{spectrum}", 
+                    self.get_W_bperp[spectrum](fields).get()
+                )
+                self.save_data(
+                    f"W_upar_{spectrum}", 
+                    self.get_W_upar[spectrum](fields).get()
+                )
+
+            if self.save_elsasser:
+                self.save_data(
+                    f"Wp_{spectrum}", self.get_Wp[spectrum](fields).get()
+                )
+                self.save_data(
+                    f"Wm_{spectrum}", self.get_Wm[spectrum](fields).get()
+                )
+
+                for index, component in enumerate(
+                    self.system.hyperdissipation_components
+                ):
+                    result_p = self.get_dWpdt_hyperdissipation[spectrum](
+                        fields, adaptive_rate, index
+                    )
+                    self.save_data(
+                        f"dWpdt_hyperdissipation_{component}_{spectrum}",
+                        -result_p.get(),
+                    )
+                    result_m = self.get_dWmdt_hyperdissipation[spectrum](
+                        fields, adaptive_rate, index
+                    )
+                    self.save_data(
+                        f"dWmdt_hyperdissipation_{component}_{spectrum}",
+                        -result_m.get(),
+                    )

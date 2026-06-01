@@ -15,7 +15,11 @@ from flucs.input import InvalidFlucsInputFileError
 from flucs.utilities.messages import flucsprint
 from flucs.utilities.cupy import KernelWrapper
 
-from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
+from .krehm_fourier_diagnostics import (
+    FreeEnergyDiag, 
+    HelicityDiag,
+    FreeEnergyDiag1D,
+)
 from .krehm_fourier_forcing import (
     KREHMFourierElsasserForcing,
     KREHMFourierMeyrandForcing,
@@ -42,7 +46,8 @@ class KREHMFourier(FourierSystem):
     # Supported diagnostics
     diags: ClassVar[set[type[FlucsDiagnostic]]] = {
         FreeEnergyDiag,
-        HelicityDiag
+        HelicityDiag,
+        FreeEnergyDiag1D
     }
 
     # Supported forcing
