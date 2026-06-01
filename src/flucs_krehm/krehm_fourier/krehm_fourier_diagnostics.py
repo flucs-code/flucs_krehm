@@ -617,7 +617,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
 
             for name in ["W", "dWdt_forcing"]:
                 self.add_var(FlucsDiagnosticVariable(
-                    name=f"{name}_{spectrum}",
+                    name=f"{spectrum}_spectra/{name}",
                     shape=shape,
                     dimensions=dimensions,
                     is_complex=False,
@@ -625,7 +625,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
 
             for component in self.system.hyperdissipation_components:
                 self.add_var(FlucsDiagnosticVariable(
-                    name=f"dWdt_hyperdissipation_{component}_{spectrum}",
+                    name=f"{spectrum}_spectra/dWdt_hyperdissipation_{component}",
                     shape=shape,
                     dimensions=dimensions,
                     is_complex=False,
@@ -654,7 +654,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
             if self.save_contributions:
                 for name in ["W_uperp", "W_dens", "W_bperp", "W_upar"]:
                     self.add_var(FlucsDiagnosticVariable(
-                        name=f"{name}_{spectrum}",
+                        name=f"{spectrum}_spectra/{name}",
                         shape=shape,
                         dimensions=dimensions,
                         is_complex=False,
@@ -689,7 +689,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
             if self.save_elsasser:
                 for name in ["Wp", "Wm"]:
                     self.add_var(FlucsDiagnosticVariable(
-                        name=f"{name}_{spectrum}",
+                        name=f"{spectrum}_spectra/{name}",
                         shape=shape,
                         dimensions=dimensions,
                         is_complex=False,
@@ -698,7 +698,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                 for component in self.system.hyperdissipation_components:
                     for name in ["dWpdt", "dWmdt"]:
                         self.add_var(FlucsDiagnosticVariable(
-                            name=f"{name}_hyperdissipation_{component}_{spectrum}",
+                            name=f"{spectrum}_spectra/{name}_hyperdissipation_{component}",
                             shape=shape,
                             dimensions=dimensions,
                             is_complex=False,
@@ -743,10 +743,10 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
 
             # Save raw spectra
             self.save_data(
-                f"W_{spectrum}", self.get_W[spectrum](fields).get()
+                f"{spectrum}_spectra/W", self.get_W[spectrum](fields).get()
             )
             self.save_data(
-                f"dWdt_forcing_{spectrum}",
+                f"{spectrum}_spectra/dWdt_forcing",
                 self.get_dWdt_forcing[spectrum](fields).get(),
             )
 
@@ -755,34 +755,34 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                     fields, adaptive_rate, index
                 )
                 self.save_data(
-                    f"dWdt_hyperdissipation_{component}_{spectrum}",
+                    f"{spectrum}_spectra/dWdt_hyperdissipation_{component}",
                     -result.get(),
                 )
 
             if self.save_contributions:
                 self.save_data(
-                    f"W_uperp_{spectrum}", 
+                    f"{spectrum}_spectra/W_uperp", 
                     self.get_W_uperp[spectrum](fields).get()
                 )
                 self.save_data(
-                    f"W_dens_{spectrum}", 
+                    f"{spectrum}_spectra/W_dens", 
                     self.get_W_dens[spectrum](fields).get()
                 )
                 self.save_data(
-                    f"W_bperp_{spectrum}", 
+                    f"{spectrum}_spectra/W_bperp", 
                     self.get_W_bperp[spectrum](fields).get()
                 )
                 self.save_data(
-                    f"W_upar_{spectrum}", 
+                    f"{spectrum}_spectra/W_upar", 
                     self.get_W_upar[spectrum](fields).get()
                 )
 
             if self.save_elsasser:
                 self.save_data(
-                    f"Wp_{spectrum}", self.get_Wp[spectrum](fields).get()
+                    f"{spectrum}_spectra/Wp", self.get_Wp[spectrum](fields).get()
                 )
                 self.save_data(
-                    f"Wm_{spectrum}", self.get_Wm[spectrum](fields).get()
+                    f"{spectrum}_spectra/Wm", self.get_Wm[spectrum](fields).get()
                 )
 
                 for index, component in enumerate(
@@ -792,13 +792,13 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                         fields, adaptive_rate, index
                     )
                     self.save_data(
-                        f"dWpdt_hyperdissipation_{component}_{spectrum}",
+                        f"{spectrum}_spectra/dWpdt_hyperdissipation_{component}",
                         -result_p.get(),
                     )
                     result_m = self.get_dWmdt_hyperdissipation[spectrum](
                         fields, adaptive_rate, index
                     )
                     self.save_data(
-                        f"dWmdt_hyperdissipation_{component}_{spectrum}",
+                        f"{spectrum}_spectra/dWmdt_hyperdissipation_{component}",
                         -result_m.get(),
                     )
