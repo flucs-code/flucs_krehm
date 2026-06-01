@@ -7,7 +7,7 @@ from collections.abc import Callable
 import cupy as cp
 
 from flucs.diagnostic import FlucsDiagnostic, FlucsDiagnosticVariable
-from flucs.solvers.fourier.fourier_system_reductions import reduce_unpadded_to_scalar
+from flucs.solvers.fourier.fourier_system_reductions import FourierReductions
 
 if TYPE_CHECKING:
     from flucs_krehm.krehm_fourier.krehm_fourier import KREHMFourier
@@ -41,6 +41,8 @@ class FreeEnergyDiag(FlucsDiagnostic):
     get_dWmdt_hyperdissipation: Callable[..., cp.ndarray]
 
     def init_vars(self) -> None:
+        reductions = FourierReductions(self.system)
+
         # Add variables for free energy and its time derivative
         for name in ["W", "dWdt_forcing", "dWdt", "dWdt_error"]:
             self.add_var(FlucsDiagnosticVariable(
@@ -60,20 +62,20 @@ class FreeEnergyDiag(FlucsDiagnostic):
             ))
 
         # Register reductions
-        self.get_W = reduce_unpadded_to_scalar(
-            self.system,
+        self.get_W = reductions.get_reduction(
+            reduction_output="scalar",
             functor="FreeEnergy_Functor",
             input_args="FLUCS_COMPLEX*",
             complex_output=False,
         )
-        self.get_dWdt_forcing = reduce_unpadded_to_scalar(
-            self.system,
+        self.get_dWdt_forcing = reductions.get_reduction(
+            reduction_output="scalar",
             functor="FreeEnergyForcing_Functor",
             input_args="FLUCS_COMPLEX*",
             complex_output=False,
         )
-        self.get_dWdt_hyperdissipation = reduce_unpadded_to_scalar(
-            self.system,
+        self.get_dWdt_hyperdissipation = reductions.get_reduction(
+            reduction_output="scalar",
             functor="FreeEnergyHyperdissipation_Functor",
             input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
             complex_output=False,
@@ -91,20 +93,32 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 ))
 
             # Register reductions
-            self.get_W_uperp = reduce_unpadded_to_scalar(
-                self.system, "FreeEnergyUperp_Functor", "FLUCS_COMPLEX*", False
+            self.get_W_uperp = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="FreeEnergyUperp_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False
             )
 
-            self.get_W_dens = reduce_unpadded_to_scalar(
-                self.system, "FreeEnergyDens_Functor", "FLUCS_COMPLEX*", False
+            self.get_W_dens = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="FreeEnergyDens_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False
             )
 
-            self.get_W_bperp = reduce_unpadded_to_scalar(
-                self.system, "FreeEnergyBperp_Functor", "FLUCS_COMPLEX*", False
+            self.get_W_bperp = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="FreeEnergyBperp_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False
             )
 
-            self.get_W_upar = reduce_unpadded_to_scalar(
-                self.system, "FreeEnergyUpar_Functor", "FLUCS_COMPLEX*", False
+            self.get_W_upar = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="FreeEnergyUpar_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False
             )
 
         # Add elsasser diagnostics
@@ -133,26 +147,26 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 ))
 
             # Register reductions
-            self.get_Wp = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_Wp = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="FreeEnergyThetap_Functor",
                 input_args="FLUCS_COMPLEX*",
                 complex_output=False,
             )
-            self.get_dWpdt_hyperdissipation = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_dWpdt_hyperdissipation = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="FreeEnergyThetapHyperdissipation_Functor",
                 input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
                 complex_output=False,
             )
-            self.get_Wm = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_Wm = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="FreeEnergyThetam_Functor",
                 input_args="FLUCS_COMPLEX*",
                 complex_output=False,
             )
-            self.get_dWmdt_hyperdissipation = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_dWmdt_hyperdissipation = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="FreeEnergyThetamHyperdissipation_Functor",
                 input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
                 complex_output=False,
@@ -212,7 +226,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
             self.save_data("W_uperp", self.get_W_uperp(fields).get().item())
 
             # (delta n_e)**2
-            self.save_data("W_density", self.get_W_dens(fields).get().item())
+            self.save_data("W_dens", self.get_W_dens(fields).get().item())
 
             # (delta b_perp)**2
             self.save_data("W_bperp", self.get_W_bperp(fields).get().item())
@@ -289,8 +303,9 @@ class HelicityDiag(FlucsDiagnostic):
     get_dHmdt_hyperdissipation: Callable[..., cp.ndarray]
 
     def init_vars(self) -> None:
-        # Add variables for helicity and its time derivative
+        reductions = FourierReductions(self.system)
 
+        # Add variables for helicity and its time derivative
         self.add_var(FlucsDiagnosticVariable(
             name="H",
             shape=(),
@@ -326,20 +341,20 @@ class HelicityDiag(FlucsDiagnostic):
             ))
 
         # Register reductions
-        self.get_H = reduce_unpadded_to_scalar(
-            self.system,
+        self.get_H = reductions.get_reduction(
+            reduction_output="scalar",
             functor="Helicity_Functor",
             input_args="FLUCS_COMPLEX*",
             complex_output=False,
         )
-        self.get_dHdt_forcing = reduce_unpadded_to_scalar(
-            self.system,
+        self.get_dHdt_forcing = reductions.get_reduction(
+            reduction_output="scalar",
             functor="HelicityForcing_Functor",
             input_args="FLUCS_COMPLEX*",
             complex_output=False,
         )
-        self.get_dHdt_hyperdissipation = reduce_unpadded_to_scalar(
-            self.system,
+        self.get_dHdt_hyperdissipation = reductions.get_reduction(
+            reduction_output="scalar",
             functor="HelicityHyperdissipation_Functor",
             input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
             complex_output=False,
@@ -357,12 +372,18 @@ class HelicityDiag(FlucsDiagnostic):
                 ))
 
             # Register reductions
-            self.get_H_apar = reduce_unpadded_to_scalar(
-                self.system, "HelicityApar_Functor", "FLUCS_COMPLEX*", False
+            self.get_H_apar = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="HelicityApar_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False
             )
 
-            self.get_H_upar = reduce_unpadded_to_scalar(
-                self.system, "HelicityUpar_Functor", "FLUCS_COMPLEX*", False
+            self.get_H_upar = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="HelicityUpar_Functor",
+                input_args="FLUCS_COMPLEX*",
+                complex_output=False
             )
 
         # Add elsasser diagnostics
@@ -407,26 +428,26 @@ class HelicityDiag(FlucsDiagnostic):
                 ))
 
             # Register reductions
-            self.get_Hp = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_Hp = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="HelicityThetap_Functor",
                 input_args="FLUCS_COMPLEX*",
                 complex_output=False,
             )
-            self.get_dHpdt_hyperdissipation = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_dHpdt_hyperdissipation = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="HelicityThetapHyperdissipation_Functor",
                 input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
                 complex_output=False,
             )
-            self.get_Hm = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_Hm = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="HelicityThetam_Functor",
                 input_args="FLUCS_COMPLEX*",
                 complex_output=False,
             )
-            self.get_dHmdt_hyperdissipation = reduce_unpadded_to_scalar(
-                self.system,
+            self.get_dHmdt_hyperdissipation = reductions.get_reduction(
+                reduction_output="scalar",
                 functor="HelicityThetamHyperdissipation_Functor",
                 input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,int",
                 complex_output=False,
