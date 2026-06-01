@@ -16,9 +16,10 @@ from flucs.utilities.messages import flucsprint
 from flucs.utilities.cupy import KernelWrapper
 
 from .krehm_fourier_diagnostics import (
-    FreeEnergyDiag, 
+    FreeEnergyDiag,
+    FreeEnergyDiag1D, 
     HelicityDiag,
-    FreeEnergyDiag1D,
+    HelicityDiag1D,
 )
 from .krehm_fourier_forcing import (
     KREHMFourierElsasserForcing,
@@ -46,8 +47,9 @@ class KREHMFourier(FourierSystem):
     # Supported diagnostics
     diags: ClassVar[set[type[FlucsDiagnostic]]] = {
         FreeEnergyDiag,
+        FreeEnergyDiag1D,
         HelicityDiag,
-        FreeEnergyDiag1D
+        HelicityDiag1D,
     }
 
     # Supported forcing
