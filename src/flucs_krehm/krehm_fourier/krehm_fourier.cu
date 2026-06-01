@@ -660,6 +660,19 @@ struct FreeEnergyForcing_Functor {
 struct FreeEnergyHyperdissipation_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT adaptive_rate;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        return (FLUCS_FLOAT)2.0
+            * Hyperdissipation_Functor<FreeEnergy_Functor>{
+                FreeEnergy_Functor{fields},
+                adaptive_rate
+            }(index);
+    }
+};
+
+struct FreeEnergyHyperdissipationComponent_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -695,6 +708,19 @@ struct FreeEnergyThetap_Functor {
 struct FreeEnergyThetapHyperdissipation_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT adaptive_rate;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        return (FLUCS_FLOAT)2.0
+            * Hyperdissipation_Functor<FreeEnergyThetap_Functor>{
+                FreeEnergyThetap_Functor{fields},
+                adaptive_rate
+            }(index);
+    }
+};
+
+struct FreeEnergyThetapHyperdissipationComponent_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -728,6 +754,19 @@ struct FreeEnergyThetam_Functor {
 };
 
 struct FreeEnergyThetamHyperdissipation_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT adaptive_rate;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        return (FLUCS_FLOAT)2.0
+            * Hyperdissipation_Functor<FreeEnergyThetam_Functor>{
+                FreeEnergyThetam_Functor{fields},
+                adaptive_rate
+            }(index);
+    }
+};
+
+struct FreeEnergyThetamHyperdissipationComponent_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
@@ -880,6 +919,19 @@ struct HelicityForcing_Functor {
 struct HelicityHyperdissipation_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT adaptive_rate;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        return (FLUCS_FLOAT)2.0
+            * Hyperdissipation_Functor<Helicity_Functor>{
+                Helicity_Functor{fields},
+                adaptive_rate
+            }(index);
+    }
+};
+
+struct HelicityHyperdissipationComponent_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -916,6 +968,19 @@ struct HelicityThetap_Functor {
 struct HelicityThetapHyperdissipation_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT adaptive_rate;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        return (FLUCS_FLOAT)2.0
+            * Hyperdissipation_Functor<HelicityThetap_Functor>{
+                HelicityThetap_Functor{fields},
+                adaptive_rate
+            }(index);
+    }
+};
+
+struct HelicityThetapHyperdissipationComponent_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -950,6 +1015,19 @@ struct HelicityThetam_Functor {
 };
 
 struct HelicityThetamHyperdissipation_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT adaptive_rate;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+        return (FLUCS_FLOAT)2.0
+            * Hyperdissipation_Functor<HelicityThetam_Functor>{
+                HelicityThetam_Functor{fields},
+                adaptive_rate
+            }(index);
+    }
+};
+
+struct HelicityThetamHyperdissipationComponent_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
