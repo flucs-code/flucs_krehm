@@ -4,7 +4,7 @@ import pathlib as pl
 import matplotlib.pyplot as plt
 from flucs.postprocessing import FlucsPostProcessing
 
-def free_energy_check(post, args):
+def check_conservation_free_energy(post, args):
 
     # Get valid files for the specified variable
     nc_paths = post.get_valid_netcdf_paths("free_energy/dWdt")
@@ -109,4 +109,4 @@ if __name__ == "__main__":
     )
 
     # Call function
-    free_energy_check(post, args)
+    check_conservation_free_energy(post, args)

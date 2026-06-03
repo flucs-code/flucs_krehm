@@ -4,7 +4,7 @@ import pathlib as pl
 import matplotlib.pyplot as plt
 from flucs.postprocessing import FlucsPostProcessing
 
-def helicity_check(post, args):
+def check_conservation_helicity(post, args):
 
     # Get valid files for the specified variable
     nc_paths = post.get_valid_netcdf_paths("helicity/dHdt")
@@ -109,4 +109,4 @@ if __name__ == "__main__":
     )
 
     # Call function
-    helicity_check(post, args)
+    check_conservation_helicity(post, args)
