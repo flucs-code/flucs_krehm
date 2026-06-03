@@ -98,17 +98,6 @@ if __name__ == "__main__":
         parents=[FlucsPostProcessing.parser()],
         description="Check helicity conservation for the isothermal KREHM system.",
     )
-
-    parser.add_argument(
-        "--groups",
-        "-g",
-        nargs="+",
-        type=str,
-        default=None,
-        required=False,
-        help="Names of groups to load. Loads all groups by default.",
-    )
-
     args = parser.parse_args()
 
     # Initialise post-processing object
