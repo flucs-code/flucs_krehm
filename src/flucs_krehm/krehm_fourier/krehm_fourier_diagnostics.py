@@ -35,9 +35,11 @@ class FreeEnergyDiag(FlucsDiagnostic):
     get_W_upar: Callable[..., cp.ndarray]
 
     get_Wp: Callable[..., cp.ndarray]
+    get_dWpdt_forcing: Callable[..., cp.ndarray]
     get_dWpdt_hyperdissipation_component: Callable[..., cp.ndarray]
 
     get_Wm: Callable[..., cp.ndarray]
+    get_dWmdt_forcing: Callable[..., cp.ndarray]
     get_dWmdt_hyperdissipation_component: Callable[..., cp.ndarray]
 
     def init_vars(self) -> None:
@@ -124,7 +126,14 @@ class FreeEnergyDiag(FlucsDiagnostic):
         # Add elsasser diagnostics
         if self.save_elsasser:
 
-            for name in ["Wp", "Wm", "dWpdt", "dWmdt"]:
+            for name in [
+                "Wp",
+                "dWpdt",
+                "dWpdt_forcing",
+                "Wm",
+                "dWmdt",
+                "dWmdt_forcing",
+            ]:
                 self.add_var(FlucsDiagnosticVariable(
                     name=name,
                     shape=(),
@@ -153,6 +162,12 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 input_args="FLUCS_COMPLEX*",
                 complex_output=False,
             )
+            self.get_dWpdt_forcing = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="FreeEnergyThetapForcing_Functor",
+                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                complex_output=False,
+            )
             self.get_dWpdt_hyperdissipation_component = reductions.get_reduction(
                 reduction_output="scalar",
                 functor="FreeEnergyThetapHyperdissipationComponent_Functor",
@@ -163,6 +178,12 @@ class FreeEnergyDiag(FlucsDiagnostic):
                 reduction_output="scalar",
                 functor="FreeEnergyThetam_Functor",
                 input_args="FLUCS_COMPLEX*",
+                complex_output=False,
+            )
+            self.get_dWmdt_forcing = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="FreeEnergyThetamForcing_Functor",
+                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dWmdt_hyperdissipation_component = reductions.get_reduction(
@@ -244,6 +265,12 @@ class FreeEnergyDiag(FlucsDiagnostic):
             Wp = self.get_Wp(fields).get().item()
             self.save_data("Wp", Wp)
 
+            # dWpdt_forcing
+            dWpdt_forcing = self.get_dWpdt_forcing(
+                fields, current_dt, current_step
+            ).get().item()
+            self.save_data("dWpdt_forcing", dWpdt_forcing)
+
             # dWpdt
             Wp_prev = self.get_Wp(fields_prev)
             dWpdt = (Wp - Wp_prev.get().item()) / current_dt
@@ -262,6 +289,12 @@ class FreeEnergyDiag(FlucsDiagnostic):
             # Wm
             Wm = self.get_Wm(fields).get().item()
             self.save_data("Wm", Wm)
+
+            # dWmdt_forcing
+            dWmdt_forcing = self.get_dWmdt_forcing(
+                fields, current_dt, current_step
+            ).get().item()
+            self.save_data("dWmdt_forcing", dWmdt_forcing)
 
             # dWmdt
             Wm_prev = self.get_Wm(fields_prev)
@@ -300,9 +333,11 @@ class HelicityDiag(FlucsDiagnostic):
     get_H_upar: Callable[..., cp.ndarray]
 
     get_Hp: Callable[..., cp.ndarray]
+    get_dHpdt_forcing: Callable[..., cp.ndarray]
     get_dHpdt_hyperdissipation_component: Callable[..., cp.ndarray]
 
     get_Hm: Callable[..., cp.ndarray]
+    get_dHmdt_forcing: Callable[..., cp.ndarray]
     get_dHmdt_hyperdissipation_component: Callable[..., cp.ndarray]
 
     def init_vars(self) -> None:
@@ -410,7 +445,19 @@ class HelicityDiag(FlucsDiagnostic):
                 is_complex=False
             ))
             self.add_var(FlucsDiagnosticVariable(
+                name="dHpdt_forcing",
+                shape=(),
+                dimensions={},
+                is_complex=False
+            ))
+            self.add_var(FlucsDiagnosticVariable(
                 name="dHmdt",
+                shape=(),
+                dimensions={},
+                is_complex=False
+            ))
+            self.add_var(FlucsDiagnosticVariable(
+                name="dHmdt_forcing",
                 shape=(),
                 dimensions={},
                 is_complex=False
@@ -437,6 +484,12 @@ class HelicityDiag(FlucsDiagnostic):
                 input_args="FLUCS_COMPLEX*",
                 complex_output=False,
             )
+            self.get_dHpdt_forcing = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="HelicityThetapForcing_Functor",
+                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                complex_output=False,
+            )
             self.get_dHpdt_hyperdissipation_component = reductions.get_reduction(
                 reduction_output="scalar",
                 functor="HelicityThetapHyperdissipationComponent_Functor",
@@ -447,6 +500,12 @@ class HelicityDiag(FlucsDiagnostic):
                 reduction_output="scalar",
                 functor="HelicityThetam_Functor",
                 input_args="FLUCS_COMPLEX*",
+                complex_output=False,
+            )
+            self.get_dHmdt_forcing = reductions.get_reduction(
+                reduction_output="scalar",
+                functor="HelicityThetamForcing_Functor",
+                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dHmdt_hyperdissipation_component = reductions.get_reduction(
@@ -522,6 +581,12 @@ class HelicityDiag(FlucsDiagnostic):
             Hp = self.get_Hp(fields).get().item()
             self.save_data("Hp", Hp)
 
+            # dHpdt_forcing
+            dHpdt_forcing = self.get_dHpdt_forcing(
+                fields, current_dt, current_step
+            ).get().item()
+            self.save_data("dHpdt_forcing", dHpdt_forcing)
+
             # dHpdt
             Hp_prev = self.get_Hp(fields_prev)
             dHpdt = (Hp - Hp_prev.get().item()) / current_dt
@@ -540,6 +605,12 @@ class HelicityDiag(FlucsDiagnostic):
             # Hm
             Hm = self.get_Hm(fields).get().item()
             self.save_data("Hm", Hm)
+
+            # dHmdt_forcing
+            dHmdt_forcing = self.get_dHmdt_forcing(
+                fields, current_dt, current_step
+            ).get().item()
+            self.save_data("dHmdt_forcing", dHmdt_forcing)
 
             # dHmdt
             Hm_prev = self.get_Hm(fields_prev)
@@ -580,8 +651,10 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
     get_W_upar: dict[str, Callable[..., cp.ndarray]]
 
     get_Wp: dict[str, Callable[..., cp.ndarray]]
+    get_dWpdt_forcing: dict[str, Callable[..., cp.ndarray]]
     get_dWpdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
     get_Wm: dict[str, Callable[..., cp.ndarray]]
+    get_dWmdt_forcing: dict[str, Callable[..., cp.ndarray]]
     get_dWmdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
 
     def init_vars(self) -> None:
@@ -611,8 +684,10 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
         self.get_W_upar = {}
 
         self.get_Wp = {}
+        self.get_dWpdt_forcing = {}
         self.get_dWpdt_hyperdissipation = {}
         self.get_Wm = {}
+        self.get_dWmdt_forcing = {}
         self.get_dWmdt_hyperdissipation = {}
 
         # Iterate over spectra types and init variables
@@ -686,9 +761,11 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
             if self.save_elsasser:
                 for name in [
                     "Wp",
-                    "dWpdt_hyperdissipation", 
-                    "Wm",  
-                    "dWmdt_hyperdissipation"
+                    "dWpdt_forcing",
+                    "dWpdt_hyperdissipation",
+                    "Wm",
+                    "dWmdt_forcing",
+                    "dWmdt_hyperdissipation",
                 ]:
                     self.add_var(FlucsDiagnosticVariable(
                         name=f"{spectrum}_spectra/{name}",
@@ -703,6 +780,12 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                     input_args="FLUCS_COMPLEX*",
                     complex_output=False
                 )
+                self.get_dWpdt_forcing[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyThetapForcing_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    complex_output=False,
+                )
                 self.get_dWpdt_hyperdissipation[spectrum] = reductions.get_reduction(
                     reduction_output=spectrum,
                     functor="FreeEnergyThetapHyperdissipation_Functor",
@@ -714,6 +797,12 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                     functor="FreeEnergyThetam_Functor",
                     input_args="FLUCS_COMPLEX*",
                     complex_output=False
+                )
+                self.get_dWmdt_forcing[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="FreeEnergyThetamForcing_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    complex_output=False,
                 )
                 self.get_dWmdt_hyperdissipation[spectrum] = reductions.get_reduction(
                     reduction_output=spectrum,
@@ -783,6 +872,16 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                     f"{spectrum}_spectra/Wp", 
                     self.get_Wp[spectrum](fields).get()
                 )
+
+                # dWpdt_forcing
+                self.save_data(
+                    f"{spectrum}_spectra/dWpdt_forcing",
+                    self.get_dWpdt_forcing[spectrum](
+                        fields, current_dt, current_step
+                    ).get(),
+                )
+
+                # dWpdt_hyperdissipation
                 result_p = self.get_dWpdt_hyperdissipation[spectrum](
                     fields, adaptive_rate
                 )
@@ -796,6 +895,16 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                     f"{spectrum}_spectra/Wm", 
                     self.get_Wm[spectrum](fields).get()
                 )
+
+                # dWmdt_forcing
+                self.save_data(
+                    f"{spectrum}_spectra/dWmdt_forcing",
+                    self.get_dWmdt_forcing[spectrum](
+                        fields, current_dt, current_step
+                    ).get(),
+                )
+
+                # dWmdt_hyperdissipation
                 result_m = self.get_dWmdt_hyperdissipation[spectrum](
                     fields, adaptive_rate
                 )
@@ -826,8 +935,10 @@ class HelicityDiag1D(FlucsDiagnostic):
     get_H_upar: dict[str, Callable[..., cp.ndarray]]
 
     get_Hp: dict[str, Callable[..., cp.ndarray]]
+    get_dHpdt_forcing: dict[str, Callable[..., cp.ndarray]]
     get_dHpdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
     get_Hm: dict[str, Callable[..., cp.ndarray]]
+    get_dHmdt_forcing: dict[str, Callable[..., cp.ndarray]]
     get_dHmdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
 
     def init_vars(self) -> None:
@@ -855,8 +966,10 @@ class HelicityDiag1D(FlucsDiagnostic):
         self.get_H_upar = {}
 
         self.get_Hp = {}
+        self.get_dHpdt_forcing = {}
         self.get_dHpdt_hyperdissipation = {}
         self.get_Hm = {}
+        self.get_dHmdt_forcing = {}
         self.get_dHmdt_hyperdissipation = {}
 
         # Iterate over spectra types and init variables
@@ -918,9 +1031,11 @@ class HelicityDiag1D(FlucsDiagnostic):
             if self.save_elsasser:
                 for name in [
                     "Hp",
+                    "dHpdt_forcing",
                     "dHpdt_hyperdissipation",
                     "Hm",
-                    "dHmdt_hyperdissipation"
+                    "dHmdt_forcing",
+                    "dHmdt_hyperdissipation",
                 ]:
                     self.add_var(FlucsDiagnosticVariable(
                         name=f"{spectrum}_spectra/{name}",
@@ -935,6 +1050,12 @@ class HelicityDiag1D(FlucsDiagnostic):
                     input_args="FLUCS_COMPLEX*",
                     complex_output=False,
                 )
+                self.get_dHpdt_forcing[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="HelicityThetapForcing_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    complex_output=False,
+                )
                 self.get_dHpdt_hyperdissipation[spectrum] = reductions.get_reduction(
                     reduction_output=spectrum,
                     functor="HelicityThetapHyperdissipation_Functor",
@@ -945,6 +1066,12 @@ class HelicityDiag1D(FlucsDiagnostic):
                     reduction_output=spectrum,
                     functor="HelicityThetam_Functor",
                     input_args="FLUCS_COMPLEX*",
+                    complex_output=False,
+                )
+                self.get_dHmdt_forcing[spectrum] = reductions.get_reduction(
+                    reduction_output=spectrum,
+                    functor="HelicityThetamForcing_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
                     complex_output=False,
                 )
                 self.get_dHmdt_hyperdissipation[spectrum] = reductions.get_reduction(
@@ -1005,6 +1132,16 @@ class HelicityDiag1D(FlucsDiagnostic):
                 self.save_data(
                     f"{spectrum}_spectra/Hp", self.get_Hp[spectrum](fields).get()
                 )
+
+                # dHpdt_forcing
+                self.save_data(
+                    f"{spectrum}_spectra/dHpdt_forcing",
+                    self.get_dHpdt_forcing[spectrum](
+                        fields, current_dt, current_step
+                    ).get(),
+                )
+
+                # dHpdt_hyperdissipation
                 result_p = self.get_dHpdt_hyperdissipation[spectrum](
                     fields, adaptive_rate
                 )
@@ -1017,6 +1154,16 @@ class HelicityDiag1D(FlucsDiagnostic):
                 self.save_data(
                     f"{spectrum}_spectra/Hm", self.get_Hm[spectrum](fields).get()
                 )
+
+                # dHmdt_forcing
+                self.save_data(
+                    f"{spectrum}_spectra/dHmdt_forcing",
+                    self.get_dHmdt_forcing[spectrum](
+                        fields, current_dt, current_step
+                    ).get(),
+                )
+
+                # dHmdt_hyperdissipation
                 result_m = self.get_dHmdt_hyperdissipation[spectrum](
                     fields, adaptive_rate
                 )

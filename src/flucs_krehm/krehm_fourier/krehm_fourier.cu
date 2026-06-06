@@ -709,6 +709,50 @@ struct FreeEnergyThetap_Functor {
     }
 };
 
+struct FreeEnergyThetapForcing_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const long long current_step;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Thetas
+        FLUCS_COMPLEX thetap, thetam;
+        FLUCS_FLOAT vphase;
+        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
+
+        // Forcing terms
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+#ifdef FORCING_EXPLICIT
+        add_forcing_explicit(
+            index, dt, current_step, fields, forcing_terms
+        );
+#endif
+
+        // Forcing in thetap
+        const FLUCS_FLOAT gamma_factor =
+            one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT phi_factor = vphase * gamma_factor;
+        const FLUCS_FLOAT prefactor =
+            sqrt(FLOAT_ONE + kperp2 * DE2);
+
+        const FLUCS_COMPLEX forcing_thetap = prefactor * (
+            phi_factor * forcing_terms[0] + forcing_terms[1]
+        );
+
+        return -kperp2 * (
+            thetap.real() * forcing_thetap.real()
+            + thetap.imag() * forcing_thetap.imag()
+        );
+    }
+};
+
 struct FreeEnergyThetapHyperdissipation_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT adaptive_rate;
@@ -754,6 +798,50 @@ struct FreeEnergyThetam_Functor {
 
         return ((FLUCS_FLOAT)0.5) * kperp2
             * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag());
+    }
+};
+
+struct FreeEnergyThetamForcing_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const long long current_step;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Thetas
+        FLUCS_COMPLEX thetap, thetam;
+        FLUCS_FLOAT vphase;
+        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
+
+        // Forcing terms
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+#ifdef FORCING_EXPLICIT
+        add_forcing_explicit(
+            index, dt, current_step, fields, forcing_terms
+        );
+#endif
+
+        // Forcing in thetam
+        const FLUCS_FLOAT gamma_factor =
+            one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT phi_factor = vphase * gamma_factor;
+        const FLUCS_FLOAT prefactor =
+            sqrt(FLOAT_ONE + kperp2 * DE2);
+
+        const FLUCS_COMPLEX forcing_thetam = prefactor * (
+            phi_factor * forcing_terms[0] - forcing_terms[1]
+        );
+
+        return -kperp2 * (
+            thetam.real() * forcing_thetam.real()
+            + thetam.imag() * forcing_thetam.imag()
+        );
     }
 };
 
@@ -962,14 +1050,38 @@ struct HelicityThetap_Functor {
         const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
         const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
-        // Thetas
-        FLUCS_COMPLEX thetap, thetam;
-        FLUCS_FLOAT vphase;
-        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
+        // Phase velocity
+        const FLUCS_FLOAT gamma_factor =
+            one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT vphase =
+            get_phase_velocity(kperp2, gamma_factor);
 
-        return ((FLUCS_FLOAT)0.5) * kperp2
-            * (thetap.real()*thetap.real() + thetap.imag()*thetap.imag())
-            / vphase;
+        return FreeEnergyThetap_Functor{fields}(index) / vphase;
+    }
+};
+
+struct HelicityThetapForcing_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const long long current_step;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Phase velocity
+        const FLUCS_FLOAT gamma_factor =
+            one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT vphase =
+            get_phase_velocity(kperp2, gamma_factor);
+
+        return FreeEnergyThetapForcing_Functor{
+            fields, dt, current_step
+        }(index) / vphase;
     }
 };
 
@@ -1011,14 +1123,38 @@ struct HelicityThetam_Functor {
         const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
         const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
-        // Thetas
-        FLUCS_COMPLEX thetap, thetam;
-        FLUCS_FLOAT vphase;
-        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
+        // Phase velocity
+        const FLUCS_FLOAT gamma_factor =
+            one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT vphase =
+            get_phase_velocity(kperp2, gamma_factor);
 
-        return ((FLUCS_FLOAT)0.5) * kperp2
-            * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag())
-            / vphase;
+        return FreeEnergyThetam_Functor{fields}(index) / vphase;
+    }
+};
+
+struct HelicityThetamForcing_Functor {
+    const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const long long current_step;
+
+    __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
+
+        // Indices
+        indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+        const FLUCS_FLOAT kx = kx_from_ikx(indices.ikx);
+        const FLUCS_FLOAT ky = ky_from_iky(indices.iky);
+        const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+        // Phase velocity
+        const FLUCS_FLOAT gamma_factor =
+            one_minus_gamma0_over_alpha(kperp2);
+        const FLUCS_FLOAT vphase =
+            get_phase_velocity(kperp2, gamma_factor);
+
+        return FreeEnergyThetamForcing_Functor{
+            fields, dt, current_step
+        }(index) / vphase;
     }
 };
 
