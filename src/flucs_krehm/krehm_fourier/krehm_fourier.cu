@@ -623,6 +623,8 @@ struct FreeEnergyUpar_Functor {
 
 struct FreeEnergyForcing_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const long long current_step;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
@@ -632,7 +634,9 @@ struct FreeEnergyForcing_Functor {
         // Forcing terms
         FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
 #ifdef FORCING_EXPLICIT
-        add_forcing_explicit(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+        add_forcing_explicit(
+            index, dt, current_step, fields, forcing_terms
+        );
 #endif
 
         // Indices and wavenumbers
@@ -880,6 +884,8 @@ struct HelicityUpar_Functor {
 
 struct HelicityForcing_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const long long current_step;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
@@ -889,7 +895,9 @@ struct HelicityForcing_Functor {
         // Forcing terms
         FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
 #ifdef FORCING_EXPLICIT
-        add_forcing_explicit(index, (FLUCS_FLOAT)0, 0, fields, forcing_terms);
+        add_forcing_explicit(
+            index, dt, current_step, fields, forcing_terms
+        );
 #endif
 
         // Indices and wavenumbers
