@@ -322,7 +322,7 @@ class HelicityDiag(FlucsDiagnostic):
     system: KREHMFourier
     option_defaults: ClassVar[dict[str, object]] = {
         "save_contributions": False,
-        "save_elsasser": False
+        "save_elsasser": False,
     }
 
     get_H: Callable[..., cp.ndarray]
@@ -1170,4 +1170,688 @@ class HelicityDiag1D(FlucsDiagnostic):
                 self.save_data(
                     f"{spectrum}_spectra/dHmdt_hyperdissipation",
                     -result_m.get(),
+                )
+
+
+class FluxesDiag(FlucsDiagnostic):
+    """
+    Computes cumulative transfer diagnostics for the KREHM invariants.
+    """
+
+    name = "fluxes"
+    system: KREHMFourier
+    option_defaults: ClassVar[dict[str, object]] = {
+        "fluxes": ["kperp"],
+        "save_free_energy": True,
+        "save_helicity": False,
+        "save_elsasser": False,
+    }
+
+    get_W: dict[str, Callable[..., cp.ndarray]]
+    get_dWdt_nonlinear: dict[str, Callable[..., cp.ndarray]]
+    get_dWdt_forcing: dict[str, Callable[..., cp.ndarray]]
+    get_dWdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    get_H: dict[str, Callable[..., cp.ndarray]]
+    get_dHdt_nonlinear: dict[str, Callable[..., cp.ndarray]]
+    get_dHdt_forcing: dict[str, Callable[..., cp.ndarray]]
+    get_dHdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    get_Wp: dict[str, Callable[..., cp.ndarray]]
+    get_dWpdt_nonlinear: dict[str, Callable[..., cp.ndarray]]
+    get_dWpdt_forcing: dict[str, Callable[..., cp.ndarray]]
+    get_dWpdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    get_Wm: dict[str, Callable[..., cp.ndarray]]
+    get_dWmdt_nonlinear: dict[str, Callable[..., cp.ndarray]]
+    get_dWmdt_forcing: dict[str, Callable[..., cp.ndarray]]
+    get_dWmdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    get_Hp: dict[str, Callable[..., cp.ndarray]]
+    get_dHpdt_nonlinear: dict[str, Callable[..., cp.ndarray]]
+    get_dHpdt_forcing: dict[str, Callable[..., cp.ndarray]]
+    get_dHpdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    get_Hm: dict[str, Callable[..., cp.ndarray]]
+    get_dHmdt_nonlinear: dict[str, Callable[..., cp.ndarray]]
+    get_dHmdt_forcing: dict[str, Callable[..., cp.ndarray]]
+    get_dHmdt_hyperdissipation: dict[str, Callable[..., cp.ndarray]]
+
+    def init_vars(self) -> None:
+        reductions = FourierReductions(self.system)
+
+        # Parse valid fluxes
+        valid_fluxes = ("kz", "kx", "ky", "kperp")
+        fluxes = self.fluxes
+        if isinstance(fluxes, str):
+            fluxes = [fluxes]
+        fluxes = tuple(dict.fromkeys(fluxes))
+
+        invalid_fluxes = set(fluxes) - set(valid_fluxes)
+        if invalid_fluxes:
+            raise ValueError(
+                f"{self.name} only supports 1D fluxes {valid_fluxes}."
+            )
+
+        # Initialise dicts
+        self.get_W = {}
+        self.get_dWdt_nonlinear = {}
+        self.get_dWdt_forcing = {}
+        self.get_dWdt_hyperdissipation = {}
+
+        self.get_H = {}
+        self.get_dHdt_nonlinear = {}
+        self.get_dHdt_forcing = {}
+        self.get_dHdt_hyperdissipation = {}
+
+        self.get_Wp = {}
+        self.get_dWpdt_nonlinear = {}
+        self.get_dWpdt_forcing = {}
+        self.get_dWpdt_hyperdissipation = {}
+
+        self.get_Wm = {}
+        self.get_dWmdt_nonlinear = {}
+        self.get_dWmdt_forcing = {}
+        self.get_dWmdt_hyperdissipation = {}
+
+        self.get_Hp = {}
+        self.get_dHpdt_nonlinear = {}
+        self.get_dHpdt_forcing = {}
+        self.get_dHpdt_hyperdissipation = {}
+
+        self.get_Hm = {}
+        self.get_dHmdt_nonlinear = {}
+        self.get_dHmdt_forcing = {}
+        self.get_dHmdt_hyperdissipation = {}
+
+        # Iterate over flux types and init variables
+        for flux in fluxes:
+            reduction_output = f"{flux}_cumulative"
+            dimensions = reductions.get_dimensions(reduction_output)
+            shape = tuple(dimensions)
+
+            # Save free-energy diagnostics if required
+            if self.save_free_energy:
+                for name in [
+                    "dWdt",
+                    "dWdt_nonlinear",
+                    "dWdt_forcing",
+                    "dWdt_hyperdissipation",
+                    "dWdt_error",
+                ]:
+                    self.add_var(FlucsDiagnosticVariable(
+                        name=f"{flux}_fluxes/{name}",
+                        shape=shape,
+                        dimensions=dimensions,
+                        is_complex=False,
+                    ))
+
+                # Register free-energy reductions
+                self.get_W[flux] = reductions.get_reduction(
+                    reduction_output=reduction_output,
+                    functor="FreeEnergy_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False,
+                )
+                self.get_dWdt_nonlinear[flux] = reductions.get_reduction(
+                    reduction_output=reduction_output,
+                    functor="FreeEnergyNonlinear_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                    complex_output=False,
+                )
+                self.get_dWdt_forcing[flux] = reductions.get_reduction(
+                    reduction_output=reduction_output,
+                    functor="FreeEnergyForcing_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    complex_output=False,
+                )
+                self.get_dWdt_hyperdissipation[flux] = (
+                    reductions.get_reduction(
+                        reduction_output=reduction_output,
+                        functor="FreeEnergyHyperdissipation_Functor",
+                        input_args="FLUCS_COMPLEX*,FLUCS_FLOAT",
+                        complex_output=False,
+                    )
+                )
+
+                # Save Elsasser diagnostics if required
+                if self.save_elsasser:
+                    for name in [
+                        "dWpdt",
+                        "dWpdt_nonlinear",
+                        "dWpdt_forcing",
+                        "dWpdt_hyperdissipation",
+                        "dWpdt_error",
+                        "dWmdt",
+                        "dWmdt_nonlinear",
+                        "dWmdt_forcing",
+                        "dWmdt_hyperdissipation",
+                        "dWmdt_error",
+                    ]:
+                        self.add_var(FlucsDiagnosticVariable(
+                            name=f"{flux}_fluxes/{name}",
+                            shape=shape,
+                            dimensions=dimensions,
+                            is_complex=False,
+                        ))
+
+                    # Register Wp reductions
+                    self.get_Wp[flux] = reductions.get_reduction(
+                        reduction_output=reduction_output,
+                        functor="FreeEnergyThetap_Functor",
+                        input_args="FLUCS_COMPLEX*",
+                        complex_output=False,
+                    )
+                    self.get_dWpdt_nonlinear[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="FreeEnergyThetapNonlinear_Functor",
+                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dWpdt_forcing[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="FreeEnergyThetapForcing_Functor",
+                            input_args=(
+                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
+                            ),
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dWpdt_hyperdissipation[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor=(
+                                "FreeEnergyThetapHyperdissipation_Functor"
+                            ),
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT",
+                            complex_output=False,
+                        )
+                    )
+
+                    # Register Wm reductions
+                    self.get_Wm[flux] = reductions.get_reduction(
+                        reduction_output=reduction_output,
+                        functor="FreeEnergyThetam_Functor",
+                        input_args="FLUCS_COMPLEX*",
+                        complex_output=False,
+                    )
+                    self.get_dWmdt_nonlinear[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="FreeEnergyThetamNonlinear_Functor",
+                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dWmdt_forcing[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="FreeEnergyThetamForcing_Functor",
+                            input_args=(
+                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
+                            ),
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dWmdt_hyperdissipation[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor=(
+                                "FreeEnergyThetamHyperdissipation_Functor"
+                            ),
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT",
+                            complex_output=False,
+                        )
+                    )
+
+            # Save helicity diagnostics if required
+            if self.save_helicity:
+                for name in [
+                    "dHdt",
+                    "dHdt_nonlinear",
+                    "dHdt_forcing",
+                    "dHdt_hyperdissipation",
+                    "dHdt_error",
+                ]:
+                    self.add_var(FlucsDiagnosticVariable(
+                        name=f"{flux}_fluxes/{name}",
+                        shape=shape,
+                        dimensions=dimensions,
+                        is_complex=False,
+                    ))
+
+                # Register helicity reductions
+                self.get_H[flux] = reductions.get_reduction(
+                    reduction_output=reduction_output,
+                    functor="Helicity_Functor",
+                    input_args="FLUCS_COMPLEX*",
+                    complex_output=False,
+                )
+                self.get_dHdt_nonlinear[flux] = reductions.get_reduction(
+                    reduction_output=reduction_output,
+                    functor="HelicityNonlinear_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                    complex_output=False,
+                )
+                self.get_dHdt_forcing[flux] = reductions.get_reduction(
+                    reduction_output=reduction_output,
+                    functor="HelicityForcing_Functor",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    complex_output=False,
+                )
+                self.get_dHdt_hyperdissipation[flux] = (
+                    reductions.get_reduction(
+                        reduction_output=reduction_output,
+                        functor="HelicityHyperdissipation_Functor",
+                        input_args="FLUCS_COMPLEX*,FLUCS_FLOAT",
+                        complex_output=False,
+                    )
+                )
+
+                # Save Elsasser diagnostics if required
+                if self.save_elsasser:
+                    for name in [
+                        "dHpdt",
+                        "dHpdt_nonlinear",
+                        "dHpdt_forcing",
+                        "dHpdt_hyperdissipation",
+                        "dHpdt_error",
+                        "dHmdt",
+                        "dHmdt_nonlinear",
+                        "dHmdt_forcing",
+                        "dHmdt_hyperdissipation",
+                        "dHmdt_error",
+                    ]:
+                        self.add_var(FlucsDiagnosticVariable(
+                            name=f"{flux}_fluxes/{name}",
+                            shape=shape,
+                            dimensions=dimensions,
+                            is_complex=False,
+                        ))
+
+                    # Register Hp reductions
+                    self.get_Hp[flux] = reductions.get_reduction(
+                        reduction_output=reduction_output,
+                        functor="HelicityThetap_Functor",
+                        input_args="FLUCS_COMPLEX*",
+                        complex_output=False,
+                    )
+                    self.get_dHpdt_nonlinear[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="HelicityThetapNonlinear_Functor",
+                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dHpdt_forcing[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="HelicityThetapForcing_Functor",
+                            input_args=(
+                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
+                            ),
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dHpdt_hyperdissipation[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor=(
+                                "HelicityThetapHyperdissipation_Functor"
+                            ),
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT",
+                            complex_output=False,
+                        )
+                    )
+
+                    # Register Hm reductions
+                    self.get_Hm[flux] = reductions.get_reduction(
+                        reduction_output=reduction_output,
+                        functor="HelicityThetam_Functor",
+                        input_args="FLUCS_COMPLEX*",
+                        complex_output=False,
+                    )
+                    self.get_dHmdt_nonlinear[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="HelicityThetamNonlinear_Functor",
+                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dHmdt_forcing[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor="HelicityThetamForcing_Functor",
+                            input_args=(
+                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
+                            ),
+                            complex_output=False,
+                        )
+                    )
+                    self.get_dHmdt_hyperdissipation[flux] = (
+                        reductions.get_reduction(
+                            reduction_output=reduction_output,
+                            functor=(
+                                "HelicityThetamHyperdissipation_Functor"
+                            ),
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT",
+                            complex_output=False,
+                        )
+                    )
+
+    def ready(self) -> None:
+        pass
+
+    def execute(self) -> None:
+        if not self.save_free_energy and not self.save_helicity:
+            return
+
+        # Useful aliases
+        current_dt = self.system.float(self.system.current_dt)
+        current_step = self.system.int(self.system.current_step)
+        adaptive_rate = self.system.float(self.system.adaptive_rate)
+
+        fields = self.system.fields[
+            self.system.current_step % self.system.fields_history_size
+        ]
+        fields_prev = self.system.fields[
+            (self.system.current_step - 1)
+            % self.system.fields_history_size
+        ]
+
+        # Calculate nonlinear terms for the current fields
+        self.system.compute_nonlinear_terms(fields)
+        dft_bits = self.system.dft_bits
+
+        # Iterate over free-energy fluxes to save
+        for flux in self.get_W:
+
+            # dWdt
+            W = self.get_W[flux](fields).get()
+            W_prev = self.get_W[flux](fields_prev).get()
+            dWdt = (W - W_prev) / current_dt
+            self.save_data(f"{flux}_fluxes/dWdt", dWdt)
+
+            # dWdt_nonlinear
+            dWdt_nonlinear = self.get_dWdt_nonlinear[flux](
+                fields, dft_bits
+            ).get()
+            self.save_data(
+                f"{flux}_fluxes/dWdt_nonlinear",
+                dWdt_nonlinear,
+            )
+
+            # dWdt_forcing
+            dWdt_forcing = self.get_dWdt_forcing[flux](
+                fields, current_dt, current_step
+            ).get()
+            self.save_data(
+                f"{flux}_fluxes/dWdt_forcing",
+                dWdt_forcing,
+            )
+
+            # dWdt_hyperdissipation
+            result = self.get_dWdt_hyperdissipation[flux](
+                fields, adaptive_rate
+            )
+            dWdt_hyperdissipation = -result.get()
+            self.save_data(
+                f"{flux}_fluxes/dWdt_hyperdissipation",
+                dWdt_hyperdissipation,
+            )
+
+            # dWdt_error
+            dWdt_error = (
+                dWdt
+                - dWdt_nonlinear
+                - dWdt_forcing
+                - dWdt_hyperdissipation
+            )
+            self.save_data(
+                f"{flux}_fluxes/dWdt_error",
+                dWdt_error,
+            )
+
+            # Save Elsasser diagnostics if required
+            if self.save_elsasser:
+
+                # dWpdt
+                Wp = self.get_Wp[flux](fields).get()
+                Wp_prev = self.get_Wp[flux](fields_prev).get()
+                dWpdt = (Wp - Wp_prev) / current_dt
+                self.save_data(f"{flux}_fluxes/dWpdt", dWpdt)
+
+                # dWpdt_nonlinear
+                dWpdt_nonlinear = self.get_dWpdt_nonlinear[flux](
+                    fields, dft_bits
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dWpdt_nonlinear",
+                    dWpdt_nonlinear,
+                )
+
+                # dWpdt_forcing
+                dWpdt_forcing = self.get_dWpdt_forcing[flux](
+                    fields, current_dt, current_step
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dWpdt_forcing",
+                    dWpdt_forcing,
+                )
+
+                # dWpdt_hyperdissipation
+                result = self.get_dWpdt_hyperdissipation[flux](
+                    fields, adaptive_rate
+                )
+                dWpdt_hyperdissipation = -result.get()
+                self.save_data(
+                    f"{flux}_fluxes/dWpdt_hyperdissipation",
+                    dWpdt_hyperdissipation,
+                )
+
+                # dWpdt_error
+                dWpdt_error = (
+                    dWpdt
+                    - dWpdt_nonlinear
+                    - dWpdt_forcing
+                    - dWpdt_hyperdissipation
+                )
+                self.save_data(
+                    f"{flux}_fluxes/dWpdt_error",
+                    dWpdt_error,
+                )
+
+                # dWmdt
+                Wm = self.get_Wm[flux](fields).get()
+                Wm_prev = self.get_Wm[flux](fields_prev).get()
+                dWmdt = (Wm - Wm_prev) / current_dt
+                self.save_data(f"{flux}_fluxes/dWmdt", dWmdt)
+
+                # dWmdt_nonlinear
+                dWmdt_nonlinear = self.get_dWmdt_nonlinear[flux](
+                    fields, dft_bits
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dWmdt_nonlinear",
+                    dWmdt_nonlinear,
+                )
+
+                # dWmdt_forcing
+                dWmdt_forcing = self.get_dWmdt_forcing[flux](
+                    fields, current_dt, current_step
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dWmdt_forcing",
+                    dWmdt_forcing,
+                )
+
+                # dWmdt_hyperdissipation
+                result = self.get_dWmdt_hyperdissipation[flux](
+                    fields, adaptive_rate
+                )
+                dWmdt_hyperdissipation = -result.get()
+                self.save_data(
+                    f"{flux}_fluxes/dWmdt_hyperdissipation",
+                    dWmdt_hyperdissipation,
+                )
+
+                # dWmdt_error
+                dWmdt_error = (
+                    dWmdt
+                    - dWmdt_nonlinear
+                    - dWmdt_forcing
+                    - dWmdt_hyperdissipation
+                )
+                self.save_data(
+                    f"{flux}_fluxes/dWmdt_error",
+                    dWmdt_error,
+                )
+
+        # Iterate over helicity fluxes to save
+        for flux in self.get_H:
+
+            # dHdt
+            H = self.get_H[flux](fields).get()
+            H_prev = self.get_H[flux](fields_prev).get()
+            dHdt = (H - H_prev) / current_dt
+            self.save_data(f"{flux}_fluxes/dHdt", dHdt)
+
+            # dHdt_nonlinear
+            dHdt_nonlinear = self.get_dHdt_nonlinear[flux](
+                fields, dft_bits
+            ).get()
+            self.save_data(
+                f"{flux}_fluxes/dHdt_nonlinear",
+                dHdt_nonlinear,
+            )
+
+            # dHdt_forcing
+            dHdt_forcing = self.get_dHdt_forcing[flux](
+                fields, current_dt, current_step
+            ).get()
+            self.save_data(
+                f"{flux}_fluxes/dHdt_forcing",
+                dHdt_forcing,
+            )
+
+            # dHdt_hyperdissipation
+            result = self.get_dHdt_hyperdissipation[flux](
+                fields, adaptive_rate
+            )
+            dHdt_hyperdissipation = -result.get()
+            self.save_data(
+                f"{flux}_fluxes/dHdt_hyperdissipation",
+                dHdt_hyperdissipation,
+            )
+
+            # dHdt_error
+            dHdt_error = (
+                dHdt
+                - dHdt_nonlinear
+                - dHdt_forcing
+                - dHdt_hyperdissipation
+            )
+            self.save_data(
+                f"{flux}_fluxes/dHdt_error",
+                dHdt_error,
+            )
+
+            # Save Elsasser diagnostics if required
+            if self.save_elsasser:
+
+                # dHpdt
+                Hp = self.get_Hp[flux](fields).get()
+                Hp_prev = self.get_Hp[flux](fields_prev).get()
+                dHpdt = (Hp - Hp_prev) / current_dt
+                self.save_data(f"{flux}_fluxes/dHpdt", dHpdt)
+
+                # dHpdt_nonlinear
+                dHpdt_nonlinear = self.get_dHpdt_nonlinear[flux](
+                    fields, dft_bits
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dHpdt_nonlinear",
+                    dHpdt_nonlinear,
+                )
+
+                # dHpdt_forcing
+                dHpdt_forcing = self.get_dHpdt_forcing[flux](
+                    fields, current_dt, current_step
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dHpdt_forcing",
+                    dHpdt_forcing,
+                )
+
+                # dHpdt_hyperdissipation
+                result = self.get_dHpdt_hyperdissipation[flux](
+                    fields, adaptive_rate
+                )
+                dHpdt_hyperdissipation = -result.get()
+                self.save_data(
+                    f"{flux}_fluxes/dHpdt_hyperdissipation",
+                    dHpdt_hyperdissipation,
+                )
+
+                # dHpdt_error
+                dHpdt_error = (
+                    dHpdt
+                    - dHpdt_nonlinear
+                    - dHpdt_forcing
+                    - dHpdt_hyperdissipation
+                )
+                self.save_data(
+                    f"{flux}_fluxes/dHpdt_error",
+                    dHpdt_error,
+                )
+
+                # dHmdt
+                Hm = self.get_Hm[flux](fields).get()
+                Hm_prev = self.get_Hm[flux](fields_prev).get()
+                dHmdt = (Hm - Hm_prev) / current_dt
+                self.save_data(f"{flux}_fluxes/dHmdt", dHmdt)
+
+                # dHmdt_nonlinear
+                dHmdt_nonlinear = self.get_dHmdt_nonlinear[flux](
+                    fields, dft_bits
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dHmdt_nonlinear",
+                    dHmdt_nonlinear,
+                )
+
+                # dHmdt_forcing
+                dHmdt_forcing = self.get_dHmdt_forcing[flux](
+                    fields, current_dt, current_step
+                ).get()
+                self.save_data(
+                    f"{flux}_fluxes/dHmdt_forcing",
+                    dHmdt_forcing,
+                )
+
+                # dHmdt_hyperdissipation
+                result = self.get_dHmdt_hyperdissipation[flux](
+                    fields, adaptive_rate
+                )
+                dHmdt_hyperdissipation = -result.get()
+                self.save_data(
+                    f"{flux}_fluxes/dHmdt_hyperdissipation",
+                    dHmdt_hyperdissipation,
+                )
+
+                # dHmdt_error
+                dHmdt_error = (
+                    dHmdt
+                    - dHmdt_nonlinear
+                    - dHmdt_forcing
+                    - dHmdt_hyperdissipation
+                )
+                self.save_data(
+                    f"{flux}_fluxes/dHmdt_error",
+                    dHmdt_error,
                 )

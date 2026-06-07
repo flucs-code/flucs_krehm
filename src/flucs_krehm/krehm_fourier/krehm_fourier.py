@@ -17,7 +17,8 @@ from flucs.utilities.cupy import KernelWrapper
 
 from .krehm_fourier_diagnostics import (
     FreeEnergyDiag,
-    FreeEnergyDiag1D, 
+    FreeEnergyDiag1D,
+    FluxesDiag,
     HelicityDiag,
     HelicityDiag1D,
 )
@@ -48,6 +49,7 @@ class KREHMFourier(FourierSystem):
     diags: ClassVar[set[type[FlucsDiagnostic]]] = {
         FreeEnergyDiag,
         FreeEnergyDiag1D,
+        FluxesDiag,
         HelicityDiag,
         HelicityDiag1D,
     }

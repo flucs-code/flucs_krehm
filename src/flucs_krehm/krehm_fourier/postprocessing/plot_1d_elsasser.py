@@ -174,14 +174,14 @@ def plot_1d_elsasser(post, args):
 
     # Setting plot options
     ax_w.set_xlabel(dimension_name)
-    ax_w.set_ylabel(r"$W^\pm/\mathrm{max}(W^\pm)$")
+    ax_w.set_ylabel(r"$W^\pm/\mathrm{max}(W^+, W^-)$")
     ax_w.set_xscale(xscale)
     ax_w.set_yscale(yscale)
     ax_w.set_ylim(ymin=ymin)
     ax_w.legend()
 
     ax_h.set_xlabel(dimension_name)
-    ax_h.set_ylabel(r"$|H^\pm|/\mathrm{max}(|H^\pm|)$")
+    ax_h.set_ylabel(r"$|H^\pm|/\mathrm{max}(|H^+|, |H^-|)$")
     ax_h.set_xscale(xscale)
     ax_h.set_yscale(yscale)
     ax_h.set_ylim(ymin=ymin)
