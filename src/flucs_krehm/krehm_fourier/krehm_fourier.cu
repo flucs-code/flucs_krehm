@@ -270,9 +270,10 @@ FLUCS_FLOAT get_phase_velocity(
 // the positive z direction, which is the opposite convention to that used in,
 // e.g., Adkins et al. (2024).
 __device__ __forceinline__
-void get_thetas_from_fields(
+void get_thetas_from_components(
     const size_t index,
-    const FLUCS_COMPLEX* fields,
+    const FLUCS_COMPLEX phi,
+    const FLUCS_COMPLEX apar,
     FLUCS_COMPLEX& thetap,
     FLUCS_COMPLEX& thetam,
     FLUCS_FLOAT& vphase
@@ -282,15 +283,11 @@ void get_thetas_from_fields(
     const size_t ikx = indices.ikx;
     const size_t iky = indices.iky;
 
-    // Wavenumbers 
+    // Wavenumbers
     const FLUCS_FLOAT kx = kx_from_ikx(ikx);
     const FLUCS_FLOAT ky = ky_from_iky(iky);
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
-
-    // Fields
-    const FLUCS_COMPLEX phi = fields[index];
-    const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
     // Useful intermediate quantities
     const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
@@ -302,6 +299,21 @@ void get_thetas_from_fields(
 
     thetap = prefactor * (phi_factor * phi + apar);
     thetam = prefactor * (phi_factor * phi - apar);
+}
+
+__device__ __forceinline__
+void get_thetas_from_fields(
+    const size_t index,
+    const FLUCS_COMPLEX* fields,
+    FLUCS_COMPLEX& thetap,
+    FLUCS_COMPLEX& thetam,
+    FLUCS_FLOAT& vphase
+){
+    // Fields
+    const FLUCS_COMPLEX phi = fields[index];
+    const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+
+    get_thetas_from_components(index, phi, apar, thetap, thetam, vphase);
 }
 
 __device__ __forceinline__
@@ -353,6 +365,40 @@ FLUCS_FLOAT get_thetas_free_energy_rate(
 
 #ifdef FORCING
 
+// The ky=0 modes are stored together with their conjugate partners. Construct
+// forcing from their physical, conjugate-symmetric component so negative
+// damping does not amplify roundoff.
+__device__ __forceinline__
+void get_forcing_fields(
+    const size_t index,
+    const FLUCS_COMPLEX* fields,
+    FLUCS_COMPLEX& phi,
+    FLUCS_COMPLEX& apar
+){
+    const indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+
+    phi = fields[index];
+    apar = fields[index + HALFUNPADDEDSIZE];
+
+    if (indices.iky != 0)
+        return;
+
+    const size_t conjugate_ikz = indices.ikz == 0 ? 0 : NZ - indices.ikz;
+    const size_t conjugate_ikx = indices.ikx == 0 ? 0 : NX - indices.ikx;
+    const size_t conjugate_index = index_from_3d<NZ, NX, HALF_NY>(
+        conjugate_ikz, conjugate_ikx, 0
+    );
+
+    phi = ((FLUCS_FLOAT)0.5) * (
+        phi
+        + conj(fields[conjugate_index])
+    );
+    apar = ((FLUCS_FLOAT)0.5) * (
+        apar
+        + conj(fields[conjugate_index + HALFUNPADDEDSIZE])
+    );
+}
+
 #if defined(FORCING_METHOD_ELSASSER)
 __device__ __forceinline__
 void add_forcing_elsasser(
@@ -390,10 +436,14 @@ void add_forcing_elsasser(
           kz_abs < FORCING_KZ_MAX))
         return;
 
-    // Get fields and matrices
+    // Fields
+    FLUCS_COMPLEX phi, apar;
+    get_forcing_fields(index, previous_fields, phi, apar);
+
+    // Matrices
     FLUCS_COMPLEX thetap, thetam;
     FLUCS_FLOAT vphase;
-    get_thetas_from_fields(index, previous_fields, thetap, thetam, vphase);
+    get_thetas_from_components(index, phi, apar, thetap, thetam, vphase);
 
     const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
 
@@ -480,8 +530,8 @@ void add_forcing_meyrand(
     const FLUCS_FLOAT helicity_prefactor = 2 * gamma_factor * kperp2 * one_plus_kperp2de2;
 
     // Fields
-    const FLUCS_COMPLEX phi = previous_fields[index];
-    const FLUCS_COMPLEX apar = previous_fields[index + HALFUNPADDEDSIZE];
+    FLUCS_COMPLEX phi, apar;
+    get_forcing_fields(index, previous_fields, phi, apar);
 
     // Useful combinations of fields
     const FLUCS_FLOAT phi2 = (
