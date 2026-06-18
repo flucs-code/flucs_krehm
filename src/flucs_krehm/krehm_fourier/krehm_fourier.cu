@@ -253,7 +253,7 @@ int explicit_term_field_index(const int term_index) {
 __device__ __forceinline__
 FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
 #ifdef ERMHD
-    return one_minus_gamma0_over_alpha_ERMHD(kperp2);
+    return one_minus_gamma0_over_alpha_eRMHD(kperp2);
 #else
     return one_minus_gamma0_over_alpha_operator(kperp2);
 #endif
@@ -263,7 +263,7 @@ FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
 __device__ __forceinline__
 FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
 #ifdef ERMHD
-    return taubarinv_ERMHD(kperp2);
+    return taubarinv_eRMHD(kperp2);
 #else
     return taubarinv_operator(kperp2);
 #endif
@@ -271,7 +271,7 @@ FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
 
 // ERMHD version, which takes gamma0->zero.
 __device__ __forceinline__
-FLUCS_FLOAT one_minus_gamma0_over_alpha_ERMHD(FLUCS_FLOAT kperp2) {
+FLUCS_FLOAT one_minus_gamma0_over_alpha_eRMHD(FLUCS_FLOAT kperp2) {
     const FLUCS_FLOAT alpha = 0.5 * RHOI2 * kperp2;
 
     return FLOAT_ONE / alpha;
@@ -279,7 +279,7 @@ FLUCS_FLOAT one_minus_gamma0_over_alpha_ERMHD(FLUCS_FLOAT kperp2) {
 
 // ERMHD version, which takes gamma0->zero.
 __device__ __forceinline__
-FLUCS_FLOAT taubarinv_ERMHD(FLUCS_FLOAT kperp2) {
+FLUCS_FLOAT taubarinv_eRMHD(FLUCS_FLOAT kperp2) {
     return ZTE_OVER_TI;
 }
 
