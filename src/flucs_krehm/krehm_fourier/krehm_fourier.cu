@@ -15,6 +15,44 @@ extern "C" {
 // Array for AB3 nonlinear terms
 __constant__ FLUCS_COMPLEX* multistep_nonlinear_terms = NULL;
 
+
+// ERMHD version, which takes gamma0->zero.
+__device__ __forceinline__
+FLUCS_FLOAT one_minus_gamma0_over_alpha_eRMHD(FLUCS_FLOAT kperp2) {
+    const FLUCS_FLOAT alpha = 0.5 * RHOI2 * kperp2;
+    
+    if (alpha < GAMMA0_ALPHA_CUTOFF)
+        return FLOAT_ONE;
+    
+    return FLOAT_ONE / alpha;
+}
+
+// ERMHD version, which takes gamma0->zero.
+__device__ __forceinline__
+FLUCS_FLOAT taubarinv_eRMHD(FLUCS_FLOAT kperp2) {
+    return ZTE_OVER_TI;
+}
+
+//Calls either the general KREHM variant or the simplifed ERMHD variant.
+__device__ __forceinline__
+FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
+#ifdef ERMHD
+    return one_minus_gamma0_over_alpha_eRMHD(kperp2);
+#else
+    return one_minus_gamma0_over_alpha_operator(kperp2);
+#endif
+}
+
+//Calls either the general KREHM variant or the simplifed ERMHD variant.
+__device__ __forceinline__
+FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
+#ifdef ERMHD
+    return taubarinv_eRMHD(kperp2);
+#else
+    return taubarinv_operator(kperp2);
+#endif
+}
+
 // Fetches the linear matrix for a given mode
 __device__ void get_linear_matrix(
     const size_t index, 
@@ -248,41 +286,6 @@ int explicit_term_field_index(const int term_index) {
 ////////////////////////////////////////////////////////////////////////////////
 // Model helper functions
 ////////////////////////////////////////////////////////////////////////////////
-
-//Calls either the general KREHM variant or the simplifed ERMHD variant.
-__device__ __forceinline__
-FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
-#ifdef ERMHD
-    return one_minus_gamma0_over_alpha_eRMHD(kperp2);
-#else
-    return one_minus_gamma0_over_alpha_operator(kperp2);
-#endif
-}
-
-//Calls either the general KREHM variant or the simplifed ERMHD variant.
-__device__ __forceinline__
-FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
-#ifdef ERMHD
-    return taubarinv_eRMHD(kperp2);
-#else
-    return taubarinv_operator(kperp2);
-#endif
-}
-
-// ERMHD version, which takes gamma0->zero.
-__device__ __forceinline__
-FLUCS_FLOAT one_minus_gamma0_over_alpha_eRMHD(FLUCS_FLOAT kperp2) {
-    const FLUCS_FLOAT alpha = 0.5 * RHOI2 * kperp2;
-
-    return FLOAT_ONE / alpha;
-}
-
-// ERMHD version, which takes gamma0->zero.
-__device__ __forceinline__
-FLUCS_FLOAT taubarinv_eRMHD(FLUCS_FLOAT kperp2) {
-    return ZTE_OVER_TI;
-}
-
 
 // Phase velocity (normalised to the Alfven speed)
 // Note that we supply one_minus_gamma0_over_alpha as an argument to avoid 
