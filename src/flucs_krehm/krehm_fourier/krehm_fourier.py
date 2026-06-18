@@ -191,9 +191,8 @@ class KREHMFourier(FourierSystem):
             )
 
             # Override parameters with appropriate values
-            rhoi = 1e3
+            rhoi = 1
             de = 0.0
-            betae_over_mass_ratio = np.inf
 
             # Compute effective value of self.ZTe_over_Ti
             betai = self.input["parameters.eRMHD_betai"]
@@ -344,6 +343,8 @@ class KREHMFourier(FourierSystem):
         self.module_options.define_float("ZTE_OVER_TI", self.ZTe_over_Ti)
         self.module_options.define_float("RHOI2", self.rhoi**2)
         self.module_options.define_float("DE2", self.de**2)
+        if self.input["parameters.eRMHD"]:
+            self.module_options.define_flag("ERMHD")
 
         super().setup_cuda_definitions()
 
@@ -434,7 +435,7 @@ class KREHMFourier(FourierSystem):
 
         # Construct functions
         alpha = 0.5 * (kperp2) * (self.rhoi**2)
-        gamma0 = i0e(alpha)
+        gamma0 = 0 if self.input["parameters.eRMHD"] else i0e(alpha)
 
         taubarinv = self.ZTe_over_Ti * (1.0 - gamma0)
 
