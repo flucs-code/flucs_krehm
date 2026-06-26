@@ -406,7 +406,7 @@ void add_forcing_elsasser(
     const FLUCS_FLOAT dt,
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT]
+    FLUCS_COMPLEX explicit_terms[2]
 )
 {
     // Unused variables
@@ -492,7 +492,7 @@ void add_forcing_meyrand(
     const FLUCS_FLOAT dt,
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT]
+    FLUCS_COMPLEX explicit_terms[2]
 )
 {
     // Unused variables
@@ -580,7 +580,7 @@ __device__ void add_forcing_explicit(
     const FLUCS_FLOAT dt, 
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS_EXPLICIT] 
+    FLUCS_COMPLEX explicit_terms[2] 
 ){
     #if defined(FORCING_METHOD_ELSASSER)
         add_forcing_elsasser(
@@ -723,7 +723,7 @@ struct FreeEnergyForcing_Functor {
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
             index, dt, current_step, fields, forcing_terms
@@ -763,7 +763,7 @@ struct FreeEnergyNonlinear_Functor {
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(index, dft_bits, nonlinear_terms);
 #endif
@@ -852,7 +852,7 @@ struct FreeEnergyThetapForcing_Functor {
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
             index, dt, current_step, fields, forcing_terms
@@ -860,7 +860,7 @@ struct FreeEnergyThetapForcing_Functor {
 #endif
 
         // Physical rates due to forcing
-        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX rates[2] = {0};
         rates[0] = -forcing_terms[0];
         rates[1] = -forcing_terms[1];
 
@@ -877,13 +877,13 @@ struct FreeEnergyThetapNonlinear_Functor {
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(index, dft_bits, nonlinear_terms);
 #endif
 
         // Physical rates due to nonlinear terms
-        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX rates[2] = {0};
         rates[0] = -nonlinear_terms[0];
         rates[1] = -nonlinear_terms[1];
 
@@ -949,7 +949,7 @@ struct FreeEnergyThetamForcing_Functor {
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
             index, dt, current_step, fields, forcing_terms
@@ -957,7 +957,7 @@ struct FreeEnergyThetamForcing_Functor {
 #endif
 
         // Physical rates due to forcing
-        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX rates[2] = {0};
         rates[0] = -forcing_terms[0];
         rates[1] = -forcing_terms[1];
 
@@ -974,13 +974,13 @@ struct FreeEnergyThetamNonlinear_Functor {
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(index, dft_bits, nonlinear_terms);
 #endif
 
         // Physical rates due to nonlinear terms
-        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX rates[2] = {0};
         rates[0] = -nonlinear_terms[0];
         rates[1] = -nonlinear_terms[1];
 
@@ -1126,7 +1126,7 @@ struct HelicityForcing_Functor {
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
             index, dt, current_step, fields, forcing_terms
@@ -1168,7 +1168,7 @@ struct HelicityNonlinear_Functor {
         const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS_EXPLICIT] = {0};
+        FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(index, dft_bits, nonlinear_terms);
 #endif
