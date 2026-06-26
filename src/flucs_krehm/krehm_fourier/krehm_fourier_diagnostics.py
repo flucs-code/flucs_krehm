@@ -1241,6 +1241,7 @@ class FluxesDiag(FlucsDiagnostic):
         invalid_fluxes = set(fluxes) - set(valid_fluxes)
         if invalid_fluxes:
             raise ValueError(
+                f"fluxes={fluxes} is invalid, "
                 f"{self.name} only supports 1D fluxes {valid_fluxes}."
             )
 
