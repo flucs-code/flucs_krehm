@@ -13,8 +13,15 @@ from flucs.diagnostic import FlucsDiagnostic
 from flucs.solvers.fourier.fourier_system import FourierSystem, FourierSystemForcing
 from flucs.input import InvalidFlucsInputFileError
 from flucs.utilities.messages import flucsprint
+from flucs.utilities.cupy import KernelWrapper
 
-from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
+from .krehm_fourier_diagnostics import (
+    FreeEnergyDiag,
+    FreeEnergyDiag1D,
+    FluxesDiag,
+    HelicityDiag,
+    HelicityDiag1D,
+)
 from .krehm_fourier_forcing import (
     KREHMFourierElsasserForcing,
     KREHMFourierMeyrandForcing,
@@ -34,16 +41,17 @@ class KREHMFourier(FourierSystem):
     phi: list[cp.ndarray]
     apar: list[cp.ndarray]
 
-    # CUDA grids and kernels
-    nonlinear_bits_shared_mem: int
-
-    find_derivatives_kernel: cp.RawKernel
-    find_nonlinear_bits_kernel: cp.RawKernel
+    # CUDA kernels
+    find_derivatives_kernel: KernelWrapper
+    find_nonlinear_bits_kernel: KernelWrapper
 
     # Supported diagnostics
     diags: ClassVar[set[type[FlucsDiagnostic]]] = {
         FreeEnergyDiag,
-        HelicityDiag
+        FreeEnergyDiag1D,
+        FluxesDiag,
+        HelicityDiag,
+        HelicityDiag1D,
     }
 
     # Supported forcing
@@ -56,10 +64,26 @@ class KREHMFourier(FourierSystem):
         # Anything system-specific goes here
         super().ready()
 
-    def setup_cuda_grids(self):
-        super().setup_cuda_grids()
-        self.nonlinear_bits_shared_mem = (
+    def register_kernels(self) -> None:
+        super().register_kernels()
+
+        nonlinear_bits_shared_mem = (
             self.cuda_block_size * self.float().nbytes
+        )
+
+        self.find_derivatives_kernel = KernelWrapper(
+            system=self,
+            cuda_kernel_name="find_derivatives",
+            grid=(self.half_padded_cuda_grid_size,),
+            block=(self.cuda_block_size,),
+        )
+
+        self.find_nonlinear_bits_kernel = KernelWrapper(
+            system=self,
+            cuda_kernel_name="find_nonlinear_bits",
+            grid=(self.full_padded_cuda_grid_size,),
+            block=(self.cuda_block_size,),
+            shared_mem=nonlinear_bits_shared_mem,
         )
 
     def _allocate_memory(self):
@@ -315,56 +339,44 @@ class KREHMFourier(FourierSystem):
                 # Fallback to solver-side initial conditions
                 super()._set_initial_conditions()
 
-    def compile_cupy_module(self) -> None:
+    def setup_cuda_definitions(self) -> None:
         # System-specific constants for the kernels
         self.module_options.define_float("ZTE_OVER_TI", self.ZTe_over_Ti)
         self.module_options.define_float("RHOI2", self.rhoi**2)
         self.module_options.define_float("DE2", self.de**2)
 
-        # Call this to compile the module
-        super().compile_cupy_module()
-
-        # System-specific kernels
-        self.find_derivatives_kernel =\
-            self.cupy_module.get_function("find_derivatives")
-
-        self.find_nonlinear_bits_kernel =\
-            self.cupy_module.get_function("find_nonlinear_bits")
+        super().setup_cuda_definitions()
 
     def begin_time_step(self) -> None:
         # Do anything model-specific here, then call the parent's method
         super().begin_time_step()
 
-    def calculate_nonlinear_terms(self) -> None:
+    def compute_nonlinear_terms(self, fields: cp.ndarray) -> None:
         """
-        Calculates the nonlinear terms. This is the most computationaly
-        intensive part of taking a time step. Here, we also determine the
-        nonlinear CFL coefficient.
+        Computes the nonlinear terms for the supplied fields. Here, we also
+        determine the nonlinear CFL coefficient.
 
         """
-        self.find_derivatives_kernel((self.half_padded_cuda_grid_size,),
-                                     (self.cuda_block_size,),
-                                     (self.fields[self.current_step % 2 - 1],
-                                      self.dft_derivatives,
-                                      self.cfl_rate))
+        self.find_derivatives_kernel(
+            fields,
+            self.dft_derivatives,
+            self.cfl_rate
+        )
 
-        self.plan_derivatives_c2r.fft(self.dft_derivatives,
-                          self.real_derivatives,
-                          cufft.CUFFT_INVERSE)
+        self.plan_derivatives_c2r.fft(
+            self.dft_derivatives,
+            self.real_derivatives,
+            cufft.CUFFT_INVERSE
+        )
 
         # NB: real_derivatives and real_bits are the same array
         self.find_nonlinear_bits_kernel(
-            (self.full_padded_cuda_grid_size,),
-            (self.cuda_block_size,),
-            (self.real_derivatives,
-             self.cfl_rate),
-            shared_mem=self.nonlinear_bits_shared_mem
+            self.real_derivatives,
+            self.cfl_rate,
         )
 
         # NB: real_derivatives and real_bits are the same array
         self.plan_bits_r2c.fft(self.real_bits, self.dft_bits, cufft.CUFFT_FORWARD)
-
-        super().calculate_nonlinear_terms()
 
     def finish_time_step(self) -> None:
         super().finish_time_step()

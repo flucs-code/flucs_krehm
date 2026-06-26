@@ -34,3 +34,8 @@ energy = 1e-3
 imbalance = 0.0
 power = 6.0
 width = 1.0
+
+[output.fluxes]
+save_steps = -1
+diags = []
+type = "netcdf4"

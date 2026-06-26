@@ -4,7 +4,7 @@ import pathlib as pl
 import matplotlib.pyplot as plt
 from flucs.postprocessing import FlucsPostProcessing
 
-def helicity_check(post, args):
+def check_conservation_helicity(post, args):
 
     # Get valid files for the specified variable
     nc_paths = post.get_valid_netcdf_paths("helicity/dHdt")
@@ -98,17 +98,6 @@ if __name__ == "__main__":
         parents=[FlucsPostProcessing.parser()],
         description="Check helicity conservation for the isothermal KREHM system.",
     )
-
-    parser.add_argument(
-        "--groups",
-        "-g",
-        nargs="+",
-        type=str,
-        default=None,
-        required=False,
-        help="Names of groups to load. Loads all groups by default.",
-    )
-
     args = parser.parse_args()
 
     # Initialise post-processing object
@@ -120,4 +109,4 @@ if __name__ == "__main__":
     )
 
     # Call function
-    helicity_check(post, args)
+    check_conservation_helicity(post, args)
