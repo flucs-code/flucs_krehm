@@ -1234,9 +1234,6 @@ class FluxesDiag(FlucsDiagnostic):
         # Parse valid fluxes
         valid_fluxes = ("kz", "kx", "ky", "kperp")
         fluxes = self.fluxes
-        if isinstance(fluxes, str):
-            fluxes = [fluxes]
-        fluxes = tuple(dict.fromkeys(fluxes))
 
         invalid_fluxes = set(fluxes) - set(valid_fluxes)
         if invalid_fluxes:
