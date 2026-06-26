@@ -4,7 +4,7 @@ import pathlib as pl
 import matplotlib.pyplot as plt
 from flucs.postprocessing import FlucsPostProcessing
 
-def helicity_check(post):
+def check_conservation_helicity(post, args):
 
     # Get valid files for the specified variable
     nc_paths = post.get_valid_netcdf_paths("helicity/dHdt")
@@ -25,23 +25,26 @@ def helicity_check(post):
 
         # Mask out initial data at restart boundaries given the calculation
         # of dH/dt is not valid at the first time step for a given run
-        time, boundaries, _ = post.load_netcdf_variable(nc_path, "time")
+        time, boundaries, _ = post.load_netcdf_variable(nc_path, "time", groups=args.groups)
         time[0] = np.nan
         for boundary in boundaries:
             time[boundary] = np.nan
 
         # Load data
-        dt = post.load_netcdf_variable(nc_path, "dt")[0]
-        helicity = post.load_netcdf_variable(nc_path, "helicity/H")[0]
-        dHdt = post.load_netcdf_variable(nc_path, "helicity/dHdt")[0]
-        dHdt_error = post.load_netcdf_variable(nc_path, "helicity/dHdt_error")[0]
-        injection = np.zeros_like(dHdt)
+        dt = post.load_netcdf_variable(nc_path, "dt", groups=args.groups)[0]
+        helicity = post.load_netcdf_variable(nc_path, "helicity/H", groups=args.groups)[0]
+        dHdt = post.load_netcdf_variable(nc_path, "helicity/dHdt", groups=args.groups)[0]
+        dHdt_forcing = post.load_netcdf_variable(nc_path, "helicity/dHdt_forcing", groups=args.groups)[0]
+        dHdt_error = post.load_netcdf_variable(nc_path, "helicity/dHdt_error", groups=args.groups)[0]
+
+        # Injection and dissipation
+        injection = dHdt_forcing
         dissipation = np.zeros_like(dHdt)
 
         # Add hyperdissipation
         for variable in variables:
             if variable.startswith("helicity/dHdt_hyperdissipation_"):
-                dissipation += post.load_netcdf_variable(nc_path, variable)[0]
+                dissipation += post.load_netcdf_variable(nc_path, variable, groups=args.groups)[0]
 
         # Add vertical lines to mark restart boundaries
         for ax in axs:
@@ -53,9 +56,9 @@ def helicity_check(post):
 
         # Plot helicity balance
         ax_balance.plot(time, dHdt, label="dH/dt", linewidth=1.5, color='black', linestyle='solid')
-        # ax_balance.plot(time, injection, label="Injection", linewidth=1.5, color='red', linestyle='solid')
+        ax_balance.plot(time, injection, label="Injection", linewidth=1.5, color='red', linestyle='solid')
         ax_balance.plot(time, dissipation, label="Dissipation", linewidth=1.5, color='blue', linestyle='solid')
-        # ax_balance.plot(time, injection + dissipation, label="Injection + dissipation", linewidth=1.5, color='black', linestyle='dashed')
+        ax_balance.plot(time, injection + dissipation, label="Injection + dissipation", linewidth=1.5, color='black', linestyle='dashed')
 
         # Compute and plot measures of the error in the helicity balance
         integrand = 0.5 * (dHdt_error[1:] + dHdt_error[:-1]) * np.diff(time) # Manual trapezoidal rule
@@ -69,6 +72,7 @@ def helicity_check(post):
 
         ax_error.plot(time, np.abs(accumulated_error), label="Accumulated", linewidth=1.5, color='black', linestyle='solid')
         ax_error.plot(time, np.abs(instantaneous_error), label="Instantaneous", linewidth=1.5, color='blue', linestyle='solid')
+        ax_error.plot(time, dt, label="dt", linewidth=1.5, color='red', linestyle='solid')
 
         # Setting plot options
         ax_error.set_xlim(np.nanmin(time), np.nanmax(time))
@@ -94,7 +98,6 @@ if __name__ == "__main__":
         parents=[FlucsPostProcessing.parser()],
         description="Check helicity conservation for the isothermal KREHM system.",
     )
-
     args = parser.parse_args()
 
     # Initialise post-processing object
@@ -106,4 +109,4 @@ if __name__ == "__main__":
     )
 
     # Call function
-    helicity_check(post)
+    check_conservation_helicity(post, args)

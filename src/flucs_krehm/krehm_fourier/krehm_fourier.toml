@@ -8,4 +8,34 @@ Ti_over_Te = 1.0
 ion_charge = 1.0
 rhoi = 0.0
 de = 0.0
-beta_over_mass_ratio = -1.0
+betae_over_mass_ratio = -1.0
+
+eRMHD = false
+eRMHD_betai = 0.0
+
+[forcing]
+
+# Generic wavenumber ranges
+range_kperp = [1.5, 2.5]
+range_kz = [0.5, 1.5]
+
+# method = "elsasser"
+energy_injection_rate = 0.1
+injection_imbalance = 0.0
+
+# method = "meyrand"
+energy_injection_rate_phi = 0.1
+energy_injection_rate_apar = 0.1
+
+[init]
+
+# method = "elsasser"
+energy = 1e-3
+imbalance = 0.0
+power = 6.0
+width = 1.0
+
+[output.fluxes]
+save_steps = -1
+diags = []
+type = "netcdf4"

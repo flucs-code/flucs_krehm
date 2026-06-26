@@ -10,17 +10,30 @@ import numpy as np
 from scipy.special import i0e
 from cupy.cuda import cufft
 from flucs.diagnostic import FlucsDiagnostic
-from flucs.solvers.fourier.fourier_system import FourierSystem
-from flucs.utilities.cupy import cupy_set_device_pointer
+from flucs.solvers.fourier.fourier_system import FourierSystem, FourierSystemForcing
 from flucs.input import InvalidFlucsInputFileError
+from flucs.utilities.messages import flucsprint
+from flucs.utilities.cupy import KernelWrapper
 
-from .krehm_fourier_diagnostics import FreeEnergyDiag, HelicityDiag
-
+from .krehm_fourier_diagnostics import (
+    FreeEnergyDiag,
+    FreeEnergyDiag1D,
+    FluxesDiag,
+    HelicityDiag,
+    HelicityDiag1D,
+)
+from .krehm_fourier_forcing import (
+    KREHMFourierElsasserForcing,
+    KREHMFourierMeyrandForcing,
+)
 
 class KREHMFourier(FourierSystem):
-    """Fourier solver for the isothermal KREHM system."""
+    """
+    Fourier solver for the isothermal KREHM system.
+
+    """
     number_of_fields = 2
-    number_of_fields_nonlinear = 2
+    number_of_fields_explicit = 2
     number_of_dft_derivatives = 6
     number_of_dft_bits = 5
 
@@ -28,32 +41,50 @@ class KREHMFourier(FourierSystem):
     phi: list[cp.ndarray]
     apar: list[cp.ndarray]
 
-    # CUDA grids and kernels
-    nonlinear_bits_shared_mem: int
-
-    find_derivatives_kernel: cp.RawKernel
-    find_nonlinear_bits_kernel: cp.RawKernel
+    # CUDA kernels
+    find_derivatives_kernel: KernelWrapper
+    find_nonlinear_bits_kernel: KernelWrapper
 
     # Supported diagnostics
     diags: ClassVar[set[type[FlucsDiagnostic]]] = {
         FreeEnergyDiag,
-        HelicityDiag
+        FreeEnergyDiag1D,
+        FluxesDiag,
+        HelicityDiag,
+        HelicityDiag1D,
+    }
+
+    # Supported forcing
+    system_forcing_methods: ClassVar[dict[str, FourierSystemForcing]] = {
+        "elsasser": KREHMFourierElsasserForcing,
+        "meyrand": KREHMFourierMeyrandForcing,
     }
 
     def ready(self):
         # Anything system-specific goes here
+        super().ready()
 
-        if not self.input["setup.linear"]:
-            cupy_set_device_pointer(self.cupy_module,
-                                    "multistep_nonlinear_terms",
-                                    self.multistep_nonlinear_terms)
+    def register_kernels(self) -> None:
+        super().register_kernels()
 
-        # Setup kernel parameters (grid, block, shared memory)
-        self.nonlinear_bits_shared_mem = (
+        nonlinear_bits_shared_mem = (
             self.cuda_block_size * self.float().nbytes
         )
 
-        super().ready()
+        self.find_derivatives_kernel = KernelWrapper(
+            system=self,
+            cuda_kernel_name="find_derivatives",
+            grid=(self.half_padded_cuda_grid_size,),
+            block=(self.cuda_block_size,),
+        )
+
+        self.find_nonlinear_bits_kernel = KernelWrapper(
+            system=self,
+            cuda_kernel_name="find_nonlinear_bits",
+            grid=(self.full_padded_cuda_grid_size,),
+            block=(self.cuda_block_size,),
+            shared_mem=nonlinear_bits_shared_mem,
+        )
 
     def _allocate_memory(self):
         """Allocates runtime arrays."""
@@ -74,11 +105,11 @@ class KREHMFourier(FourierSystem):
                                memptr=self.fields[1][0, 0, 0, 0].data),]
 
         self.apar = [cp.ndarray((self.nz, self.nx, self.half_ny),
-                             dtype=self.complex,
-                             memptr=self.fields[0][1, 0, 0, 0].data),
-                  cp.ndarray((self.nz, self.nx, self.half_ny),
-                             dtype=self.complex,
-                             memptr=self.fields[1][1, 0, 0, 0].data),]
+                                dtype=self.complex,
+                                memptr=self.fields[0][1, 0, 0, 0].data),
+                     cp.ndarray((self.nz, self.nx, self.half_ny),
+                                dtype=self.complex,
+                                memptr=self.fields[1][1, 0, 0, 0].data),]
 
         # All fields and derivatives to be transformed to real space
         # are kept in one huge array (dft_derivatives).
@@ -120,7 +151,15 @@ class KREHMFourier(FourierSystem):
         parameters and infers any implicit parameters.
 
         The default parameter values give the standard RMHD system
-        of equations.
+        of equations. Note that the only paramaters that appear in the evolved
+        equations are
+
+        self.ZTe_over_Ti
+        self.rhoi
+        self.de
+
+        All other parameters are to allow the user flexibility in how they 
+        specify the physical input parameters.
         """
 
         # Check positiveness of parameters
@@ -137,95 +176,211 @@ class KREHMFourier(FourierSystem):
         rhoi = self.input["parameters.rhoi"]
         de = self.input["parameters.de"]
 
-        beta_over_mass_ratio = self.input["parameters.beta_over_mass_ratio"]
+        betae_over_mass_ratio = self.input["parameters.betae_over_mass_ratio"]
 
-        # Handle finite beta parameters
-        if de >= 0.0 and beta_over_mass_ratio > 0.0:
+        # Equilibrium parameters
+        self.Ti_over_Te = Ti_over_Te
+        self.ion_charge = ion_charge
+
+        # Handle eRMHD limit
+        if self.input["parameters.eRMHD"]:
+            flucsprint(
+                "Running in electron-RMHD limit, " \
+                "overriding lengthscale parameters.", 
+                source=self
+            )
+
+            # Override parameters with appropriate values
+            rhoi = 1e3
+            de = 0.0
+            betae_over_mass_ratio = np.inf
+
+            # Compute effective value of self.ZTe_over_Ti
+            betai = self.input["parameters.eRMHD_betai"]
+
+            ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
+
+            self.ZTe_over_Ti = (
+                  (ZTe_over_Ti - (betai * (1.0 + ZTe_over_Ti) / 2.0))
+                / (1.0         + (betai * (1.0 + ZTe_over_Ti) / 2.0))
+            )
+        else:
+            # Use the usual definition
+            self.ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
+
+        # Ion-scale parameters
+        self.rhoi = rhoi
+        self.rhos = np.sqrt(self.ion_charge / (2 * self.Ti_over_Te)) * self.rhoi
+
+        # Finite-electron-inertia parameters
+        if de >= 0.0 and betae_over_mass_ratio > 0.0:
             raise InvalidFlucsInputFileError(
                 "Only one of the parameters.de and "
-                "parameters.beta_over_mass_ratio should be specified."
+                "parameters.betae_over_mass_ratio should be specified."
             )
 
         if de == 0.0:
-            beta_over_mass_ratio = np.inf
+            betae_over_mass_ratio = np.inf
         elif de > 0.0:
-            beta_over_mass_ratio = (
+            betae_over_mass_ratio = (
                 (ion_charge**2 / Ti_over_Te) * (rhoi / de)**2
             )
-        elif beta_over_mass_ratio > 0.0:
+        elif betae_over_mass_ratio > 0.0:
             de = ion_charge * rhoi / np.sqrt(
-                Ti_over_Te * beta_over_mass_ratio
+                Ti_over_Te * betae_over_mass_ratio
             )
         else:
             raise InvalidFlucsInputFileError(
                 "Please specify at least one of parameters.de and "
-                "parameters.beta_over_mass_ratio."
+                "parameters.betae_over_mass_ratio."
             )
-
-        # Store final parameters
-        self.Ti_over_Te = Ti_over_Te
-        self.ion_charge = ion_charge
-        self.ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
-
-        self.rhoi = rhoi
-        self.rhos = np.sqrt(self.ion_charge / (2 * self.Ti_over_Te)) * self.rhoi
-
+        
         self.de = de
-        self.beta_over_mass_ratio = beta_over_mass_ratio
+        self.betae_over_mass_ratio = betae_over_mass_ratio
 
-    def compile_cupy_module(self) -> None:
+    def _set_initial_conditions(self) -> None:
+        """
+        System-specific initial conditions go here
+        """
+
+        # Use restart data
+        if self.restart_manager.data is not None:
+            super()._set_initial_conditions()
+            return
+
+        # Handle known initialisation types
+        match self.input["init.method"]:
+
+            case "elsasser":
+                # Validate parameters
+                energy = self.input["init.energy"]
+                imbalance = self.input["init.imbalance"]
+
+                if energy <= 0.0:
+                    raise InvalidFlucsInputFileError(
+                        "init.energy must be positive."
+                    )
+                if (imbalance < -1.0) or (imbalance > +1.0):
+                    raise InvalidFlucsInputFileError(
+                        "init.imbalance must be between -1.0 and 1.0."
+                    )
+
+                # Target Elsasser energies
+                Wp_target = 0.5 * (1.0 + imbalance) * energy
+                Wm_target = 0.5 * (1.0 - imbalance) * energy
+
+                # Construct wavenumbers
+                kx, ky, kz = self.get_broadcast_wavenumbers()
+                kperp2 = kx**2 + ky**2
+
+                valid_kz = np.zeros_like(kz, dtype=bool)
+                valid_kz[+1, :, :] = True
+                valid_kz[-1, :, :] = True
+
+                # Envelope
+                envelope = (kperp2 ** self.input["init.power"]) * np.exp(
+                    -2.0 * (kperp2 /  self.input["init.width"] ** 2)
+                )
+                envelope[~((kperp2 > 0.0) & valid_kz)] = 0.0
+
+                # Weight for wavenumbe summation
+                weight = np.ones((1, 1, self.half_ny), dtype=kperp2.dtype)
+                weight[..., 1:] = 2.0
+
+                # Construct thetas with random phases
+                random = np.random.default_rng(self.input["init.rand_seed"])
+                thetas = []
+
+                for target in (Wp_target, Wm_target):
+                    # Base object
+                    theta = (
+                        envelope
+                        * np.exp(
+                            1j * random.uniform(
+                                0.0,
+                                2.0 * np.pi,
+                                size=self.half_unpadded_tuple,
+                            )
+                        )
+                    ).astype(self.complex)
+
+                    # Handle reality condition
+                    theta_ky0 = theta[:, :, 0]
+                    theta_ky0[0, 0] = 0  # should be zero already
+                    theta_ky0[0, self.half_nx:] = np.conj(
+                        theta_ky0[0, 1:self.half_nx][::-1]
+                    )
+                    theta_ky0[self.half_nz:, 0] = np.conj(
+                        theta_ky0[1:self.half_nz, 0][::-1]
+                    )
+                    theta_ky0[self.half_nz:, 1:] = np.conj(
+                        theta_ky0[1:self.half_nz, 1:][::-1, ::-1]
+                    )
+
+                    theta[:, :, 0] = theta_ky0[:, :]
+
+                    # Scale by free-energy contribution
+                    W_theta = 0.5 * np.sum(
+                        weight * kperp2 * theta * np.conj(theta)
+                    ).real
+                    thetas.append(np.sqrt(target / W_theta) * theta)
+
+                # Unpack thetas
+                thetap, thetam = thetas
+
+                # Convert to evolved fields
+                phi, apar = self.compute_fields_from_thetas(thetap, thetam)
+
+                self.fields_initial = np.stack(
+                    (phi, apar), axis=0
+                ).astype(self.complex)
+
+            case _:
+                # Fallback to solver-side initial conditions
+                super()._set_initial_conditions()
+
+    def setup_cuda_definitions(self) -> None:
         # System-specific constants for the kernels
         self.module_options.define_float("ZTE_OVER_TI", self.ZTe_over_Ti)
         self.module_options.define_float("RHOI2", self.rhoi**2)
         self.module_options.define_float("DE2", self.de**2)
 
-        # Call this to compile the module
-        super().compile_cupy_module()
-
-        # System-specific kernels
-        self.find_derivatives_kernel =\
-            self.cupy_module.get_function("find_derivatives")
-
-        self.find_nonlinear_bits_kernel =\
-            self.cupy_module.get_function("find_nonlinear_bits")
+        super().setup_cuda_definitions()
 
     def begin_time_step(self) -> None:
         # Do anything model-specific here, then call the parent's method
         super().begin_time_step()
 
-    def calculate_nonlinear_terms(self) -> None:
+    def compute_nonlinear_terms(self, fields: cp.ndarray) -> None:
         """
-        Calculates the nonlinear terms. This is the most computationaly
-        intensive part of taking a time step. Here, we also determine the
-        nonlinear CFL coefficient.
+        Computes the nonlinear terms for the supplied fields. Here, we also
+        determine the nonlinear CFL coefficient.
 
         """
-        self.find_derivatives_kernel((self.half_padded_cuda_grid_size,),
-                                     (self.cuda_block_size,),
-                                     (self.fields[self.current_step % 2 - 1],
-                                      self.dft_derivatives,
-                                      self.cfl_rate))
+        self.find_derivatives_kernel(
+            fields,
+            self.dft_derivatives,
+            self.cfl_rate
+        )
 
-        self.plan_derivatives_c2r.fft(self.dft_derivatives,
-                          self.real_derivatives,
-                          cufft.CUFFT_INVERSE)
+        self.plan_derivatives_c2r.fft(
+            self.dft_derivatives,
+            self.real_derivatives,
+            cufft.CUFFT_INVERSE
+        )
 
         # NB: real_derivatives and real_bits are the same array
         self.find_nonlinear_bits_kernel(
-            (self.full_padded_cuda_grid_size,),
-            (self.cuda_block_size,),
-            (self.real_derivatives,
-             self.cfl_rate),
-            shared_mem=self.nonlinear_bits_shared_mem
+            self.real_derivatives,
+            self.cfl_rate,
         )
 
         # NB: real_derivatives and real_bits are the same array
         self.plan_bits_r2c.fft(self.real_bits, self.dft_bits, cufft.CUFFT_FORWARD)
 
-        super().calculate_nonlinear_terms()
-
     def finish_time_step(self) -> None:
         super().finish_time_step()
+
 
     def compute_linear_matrix_reference(self) -> np.ndarray:
         # Initialise linear matrix
@@ -248,14 +403,8 @@ class KREHMFourier(FourierSystem):
         ZTe_over_Ti = self.ZTe_over_Ti
 
         # Construct useful functions
-        alpha = 0.5 * (kperp2) * (rhoi**2)
-        gamma0 = i0e(alpha)
-        taubarinv = ZTe_over_Ti * (1.0 - gamma0)
-        one_minus_gamma0_over_alpha = np.divide(
-            1.0 - gamma0,
-            alpha,
-            out=np.ones_like(alpha),
-            where=(alpha != 0.0)
+        taubarinv, one_minus_gamma0_over_alpha = (
+            self.compute_ion_flr_terms(kperp2)
         )
 
         # phi-phi
@@ -273,3 +422,111 @@ class KREHMFourier(FourierSystem):
         linear_matrix[1, 1, :, :, :] = 0.0
 
         return linear_matrix
+
+    def compute_ion_flr_terms(
+            self, 
+            kperp2: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Computes the useful functions taubarinv and one_minus_gamma0_over_alpha
+        that appear in various places in the equations using CPU memory. 
+        """
+
+        # Construct functions
+        alpha = 0.5 * (kperp2) * (self.rhoi**2)
+        gamma0 = i0e(alpha)
+
+        taubarinv = self.ZTe_over_Ti * (1.0 - gamma0)
+
+        one_minus_gamma0_over_alpha = np.divide(
+            1.0 - gamma0,
+            alpha,
+            out=np.ones_like(alpha),
+            where=(alpha != 0.0)
+        )
+
+        return taubarinv, one_minus_gamma0_over_alpha
+
+    def compute_phase_velocity(
+            self,
+            kperp2: np.ndarray
+        ) -> np.ndarray:
+        """
+        Computes the phase velocity (normalised to the Alfven speed) using 
+        CPU memory.
+
+        """
+
+        # Get ion FLR functions
+        one_minus_gamma0_over_alpha = (self.compute_ion_flr_terms(kperp2))[1]
+        alpha = 0.5 * (kperp2) * (self.rhoi**2)
+
+        # Construct phase velocity
+        vphase = np.sqrt(
+            (self.ZTe_over_Ti * alpha + 1.0/one_minus_gamma0_over_alpha) /
+            (1.0 + kperp2 * self.de**2)  
+        )
+
+        return vphase
+
+    def compute_thetas_from_fields(
+            self, 
+            phi: np.ndarray, 
+            apar: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Given the Fourier-space fields, computes the corresponding Elsasser
+        potentials using CPU memory. 
+
+        """
+        # Construct wavenumbers
+        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kperp2 = kx**2 + ky**2
+
+        # Construct ion FLR functions
+        one_minus_gamma0_over_alpha = (self.compute_ion_flr_terms(kperp2))[1]
+
+        # Construct phase velocity
+        vphase = self.compute_phase_velocity(kperp2)
+
+        # Construct thetas
+        phi_factor = vphase * one_minus_gamma0_over_alpha
+
+        thetap = np.sqrt(1 + kperp2 * self.de**2) * (phi_factor * phi + apar)
+        thetam = np.sqrt(1 + kperp2 * self.de**2) * (phi_factor * phi - apar)
+
+        return thetap, thetam
+
+    def compute_fields_from_thetas(
+            self, 
+            thetap: np.ndarray, 
+            thetam: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Given the Fourier-space Elsasser potentials, computes the corresponding 
+        fields using CPU memory.
+
+        """
+        # Construct wavenumbers
+        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kperp2 = kx**2 + ky**2
+
+        # Construct ion FLR functions
+        taubarinv, one_minus_gamma0_over_alpha = (
+            self.compute_ion_flr_terms(kperp2)
+        )
+
+        # Construct phase velocity
+        vphase = self.compute_phase_velocity(kperp2)
+
+        # Construct fields
+        phi_factor = vphase * one_minus_gamma0_over_alpha
+
+        phi  = 0.5 * (thetap + thetam) / (
+            np.sqrt(1 + kperp2 * self.de**2) * phi_factor
+        )
+        apar = 0.5 * (thetap - thetam) / (
+            np.sqrt(1 + kperp2 * self.de**2)
+        )
+
+        return phi, apar
