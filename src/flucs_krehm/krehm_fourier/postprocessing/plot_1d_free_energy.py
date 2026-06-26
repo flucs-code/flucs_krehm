@@ -23,7 +23,7 @@ def plot_1d_free_energy(post, args):
     # Initialise plotting
     fig_w, ax_w = plt.subplots(1, 1, layout="constrained")
 
-    ymin = 1e-6
+    ymin = 1e-12
     xscale = "log"
     yscale = "log"
 
