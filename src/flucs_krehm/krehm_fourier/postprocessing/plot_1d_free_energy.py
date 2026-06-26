@@ -206,7 +206,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         parents=[FlucsPostProcessing.parser()],
         description=(
-            "Plot the 1D free-energy spectrum for the isothermal KREHM system.",
+            "Plot the 1D free-energy spectrum for the isothermal KREHM system."
         )
     )
 
