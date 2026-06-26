@@ -320,7 +320,7 @@ __device__ __forceinline__
 FLUCS_FLOAT get_thetas_free_energy_rate(
     const size_t index,
     const FLUCS_COMPLEX* fields,
-    const FLUCS_COMPLEX rates[NUMBER_OF_FIELDS_EXPLICIT],
+    const FLUCS_COMPLEX rates[2],
     const int theta_sign
 ){
     // Indices
