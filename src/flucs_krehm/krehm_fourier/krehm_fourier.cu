@@ -551,9 +551,7 @@ void add_forcing_meyrand(
 
     const FLUCS_FLOAT det = a00 * a11 - a10 * a01;
 
-    // Might be nice to have a system-wide eps, but this is also fine
-    constexpr FLUCS_FLOAT eps = (FLUCS_FLOAT)1e-12;
-    if (flucs_fabs(det) < eps * (
+    if (flucs_fabs(det) < FLUCS_EPSILON * (
             a00*a00 + a01*a01 + a10*a10 + a11*a11
         )
     ) {
