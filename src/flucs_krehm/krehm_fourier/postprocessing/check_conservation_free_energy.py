@@ -86,7 +86,7 @@ def check_conservation_free_energy(post, args):
         # Save figures if required
         post.save(fig, name=figure_name, suffix="png", save_kwargs={"dpi": 300, "close": True})
 
-        plt.show()
+    plt.show()
 
 
     return

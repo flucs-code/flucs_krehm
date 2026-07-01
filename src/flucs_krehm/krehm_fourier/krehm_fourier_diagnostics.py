@@ -8,6 +8,7 @@ import cupy as cp
 
 from flucs.diagnostic import FlucsDiagnostic, FlucsDiagnosticVariable
 from flucs.solvers.fourier.fourier_system_reductions import FourierReductions
+from flucs.utilities.messages import flucsprint
 
 if TYPE_CHECKING:
     from flucs_krehm.krehm_fourier.krehm_fourier import KREHMFourier
@@ -1220,16 +1221,24 @@ class FluxesDiag(FlucsDiagnostic):
     def init_vars(self) -> None:
         reductions = FourierReductions(self.system)
 
+        # Check whether the run is a nonlinear one
+        self.disabled = self.system.input["setup.linear"]
+        if self.disabled:
+            flucsprint(
+                "Disabled for linear simulations.",
+                source=self,
+                message_type="warning",
+            )
+            return
+
         # Parse valid fluxes
         valid_fluxes = ("kz", "kx", "ky", "kperp")
         fluxes = self.fluxes
-        if isinstance(fluxes, str):
-            fluxes = [fluxes]
-        fluxes = tuple(dict.fromkeys(fluxes))
 
         invalid_fluxes = set(fluxes) - set(valid_fluxes)
         if invalid_fluxes:
             raise ValueError(
+                f"fluxes={fluxes} is invalid, "
                 f"{self.name} only supports 1D fluxes {valid_fluxes}."
             )
 
@@ -1548,6 +1557,8 @@ class FluxesDiag(FlucsDiagnostic):
         pass
 
     def execute(self) -> None:
+        if self.disabled:
+            return
         if not self.save_free_energy and not self.save_helicity:
             return
 

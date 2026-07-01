@@ -216,7 +216,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         parents=[FlucsPostProcessing.parser()],
         description=(
-            "Plot 1D Elsasser spectra for the isothermal KREHM system.",
+            "Plot 1D Elsasser spectra for the isothermal KREHM system."
         )
     )
 
