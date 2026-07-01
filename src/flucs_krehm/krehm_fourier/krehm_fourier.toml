@@ -10,8 +10,8 @@ rhoi = 0.0
 de = 0.0
 betae_over_mass_ratio = -1.0
 
-eRMHD = false
-eRMHD_betai = 0.0
+ermhd = false
+ermhd_betai = 0.0
 
 [forcing]
 

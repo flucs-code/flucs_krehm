@@ -183,10 +183,10 @@ class KREHMFourier(FourierSystem):
         self.ion_charge = ion_charge
 
         # Handle eRMHD limit
-        if self.input["parameters.eRMHD"]:
+        if self.input["parameters.ermhd"]:
             flucsprint(
                 "Running in electron-RMHD limit, " \
-                "overriding lengthscale parameters.", 
+                "overriding existing lengthscale parameters.", 
                 source=self
             )
 
@@ -195,7 +195,7 @@ class KREHMFourier(FourierSystem):
             de = 0.0
 
             # Compute effective value of self.ZTe_over_Ti
-            betai = self.input["parameters.eRMHD_betai"]
+            betai = self.input["parameters.ermhd_betai"]
 
             ZTe_over_Ti = self.ion_charge / self.Ti_over_Te
 
@@ -343,7 +343,7 @@ class KREHMFourier(FourierSystem):
         self.module_options.define_float("ZTE_OVER_TI", self.ZTe_over_Ti)
         self.module_options.define_float("RHOI2", self.rhoi**2)
         self.module_options.define_float("DE2", self.de**2)
-        if self.input["parameters.eRMHD"]:
+        if self.input["parameters.ermhd"]:
             self.module_options.define_flag("ERMHD")
 
         super().setup_cuda_definitions()
@@ -435,7 +435,7 @@ class KREHMFourier(FourierSystem):
 
         # Construct functions
         alpha = 0.5 * (kperp2) * (self.rhoi**2)
-        gamma0 = 0 if self.input["parameters.eRMHD"] else i0e(alpha)
+        gamma0 = 0 if self.input["parameters.ermhd"] else i0e(alpha)
 
         taubarinv = self.ZTe_over_Ti * (1.0 - gamma0)
 

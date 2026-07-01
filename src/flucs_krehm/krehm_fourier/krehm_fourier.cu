@@ -16,38 +16,24 @@ extern "C" {
 __constant__ FLUCS_COMPLEX* multistep_nonlinear_terms = NULL;
 
 
-// ERMHD version, which takes gamma0->zero.
-__device__ __forceinline__
-FLUCS_FLOAT one_minus_gamma0_over_alpha_eRMHD(FLUCS_FLOAT kperp2) {
-    const FLUCS_FLOAT alpha = 0.5 * RHOI2 * kperp2;
-    
-    if (alpha < GAMMA0_ALPHA_CUTOFF)
-        return FLOAT_ONE;
-    
-    return FLOAT_ONE / alpha;
-}
-
-// ERMHD version, which takes gamma0->zero.
-__device__ __forceinline__
-FLUCS_FLOAT taubarinv_eRMHD(FLUCS_FLOAT kperp2) {
-    return ZTE_OVER_TI;
-}
-
-//Calls either the general KREHM variant or the simplifed ERMHD variant.
 __device__ __forceinline__
 FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
+
+// ERMHD variant that sets gamma0 to zero
 #ifdef ERMHD
-    return one_minus_gamma0_over_alpha_eRMHD(kperp2);
+    const FLUCS_FLOAT alpha = ((FLUCS_FLOAT)0.5) * RHOI2 * kperp2;
+    return alpha < FLUCS_EPSILON ? FLOAT_ONE : FLOAT_ONE / alpha;
 #else
     return one_minus_gamma0_over_alpha_operator(kperp2);
 #endif
 }
 
-//Calls either the general KREHM variant or the simplifed ERMHD variant.
 __device__ __forceinline__
 FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
+
+// ERMHD variant that sets gamma0 to zero
 #ifdef ERMHD
-    return taubarinv_eRMHD(kperp2);
+    return ZTE_OVER_TI;
 #else
     return taubarinv_operator(kperp2);
 #endif
