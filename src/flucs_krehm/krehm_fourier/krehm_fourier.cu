@@ -239,12 +239,6 @@ __device__ void add_nonlinear_terms(
 
 }
 
-// Mapping of nonlinear terms to fields
-__device__ __forceinline__
-int explicit_term_field_index(const int term_index) {
-    return term_index; // Trivial indexing in this case
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Model helper functions
 ////////////////////////////////////////////////////////////////////////////////

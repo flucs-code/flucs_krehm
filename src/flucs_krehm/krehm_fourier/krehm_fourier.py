@@ -33,7 +33,6 @@ class KREHMFourier(FourierSystem):
 
     """
     number_of_fields = 2
-    number_of_fields_explicit = 2
     number_of_dft_derivatives = 6
     number_of_dft_bits = 5
 
