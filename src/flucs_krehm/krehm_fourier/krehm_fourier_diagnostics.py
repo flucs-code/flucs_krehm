@@ -1866,3 +1866,23 @@ class FluxesDiag(FlucsDiagnostic):
                     f"{flux}_fluxes/dHmdt_error",
                     dHmdt_error,
                 )
+
+class CL04Anisotropy(FlucsDiagnostic):
+    """
+    Computes kpar as a function of kperp using the prescription of Cho & Lazarian (2004).
+    """
+
+    name = "cl04_anisotropy"
+    system: KREHMFourier
+
+    get_kpar: dict[str, Callable[..., cp.ndarray]]
+
+
+    def init_vars(self) -> None:
+        pass
+
+    def ready(self) -> None:
+        pass
+
+    def execute(self) -> None:
+        pass
