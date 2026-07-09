@@ -1442,8 +1442,5 @@ struct HelicityThetamHyperdissipationComponent_Functor {
     }
 };
 
-struct CL04Anisotropy_Functor{
-    return
-}
 
 } // extern "C"

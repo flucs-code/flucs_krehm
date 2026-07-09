@@ -21,6 +21,7 @@ from .krehm_fourier_diagnostics import (
     FluxesDiag,
     HelicityDiag,
     HelicityDiag1D,
+    CL04Anisotropy
 )
 from .krehm_fourier_forcing import (
     KREHMFourierElsasserForcing,
@@ -52,6 +53,7 @@ class KREHMFourier(FourierSystem):
         FluxesDiag,
         HelicityDiag,
         HelicityDiag1D,
+        CL04Anisotropy,
     }
 
     # Supported forcing

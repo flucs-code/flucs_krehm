@@ -1874,15 +1874,130 @@ class CL04Anisotropy(FlucsDiagnostic):
 
     name = "cl04_anisotropy"
     system: KREHMFourier
+    option_defaults: ClassVar[dict[str, object]] = {
+        "compute_on_gpu": True,
+    }
 
-    get_kpar: dict[str, Callable[..., cp.ndarray]]
 
 
     def init_vars(self) -> None:
-        pass
+        #TODO: generalise to KREHM
+        if not self.system.input["parameters.ermhd"]:
+            raise Exception("CL04 anisotropy not configured for isothermal KREHM, only ERMHD")
+        
+        self.system._compute_kperp_shells()
+        dimensions = {'kperp':self.system.shell_kperp}
+        shape = tuple(dimensions)
+        self.add_var(FlucsDiagnosticVariable(
+            name="kpar",
+            shape=shape,
+            dimensions=dimensions,
+            is_complex=False,
+        ))
 
     def ready(self) -> None:
         pass
 
     def execute(self) -> None:
-        pass
+        # if self.compute_on_gpu:
+        #     self.system.get_realspace_fields_gpu()
+        # else:
+        #     self.system.get_realspace_fields_cpu()
+
+        # current_dt = self.system.float(self.system.current_dt)
+        # current_step = self.system.int(self.system.current_step)
+        # adaptive_rate = self.system.float(self.system.adaptive_rate)
+
+        fields = self.system.fields[
+            self.system.current_step % self.system.fields_history_size
+        ]
+
+        phi = fields[0]
+        apar = fields[1]
+
+        kx, ky, kz = self.system.get_broadcast_wavenumbers()
+        kx = cp.asarray(kx)
+        ky = cp.asarray(ky)
+        kz = cp.asarray(kz)
+
+        nkperp = self.system.shell_nkperp
+        kperp = cp.asarray(self.system.shell_kperp)
+
+        kpar = cp.zeros(nkperp)
+
+        #done as loop because otherwise too much memory required
+        #TODO: use CUDA kernel for speed
+        for i,kperp_single in enumerate(kperp):
+
+            deltaBz = cp.sqrt(2) * phi
+            deltaBx = 1j * ky * apar
+            deltaBy = - 1j * kx * apar
+
+            deltaB = cp.stack([deltaBz,deltaBx,deltaBy],axis=0)
+
+
+            kperp_dash = cp.sqrt(kx[None,:,:,:]**2 + ky[None,:,:,:]**2)
+            deltaB_locmean = cp.where(kperp_dash < kperp_single/2,deltaB,cp.zeros_like(deltaB))
+            deltaB_locmean[0] = cp.zeros_like(deltaB[0])#the z-component of mean-local field is just the guide field
+
+
+            deltaB_locfluc = cp.where(kperp_dash > kperp_single/2,deltaB,cp.zeros_like(deltaB))
+
+            kvec = cp.stack([kx,ky,kz],axis=0)
+            grad_deltaB_locfluc = 1j * cp.einsum('imln,jmln->ijmln',kvec,deltaB_locfluc)
+
+
+            deltaB_locmean_realspace = cp.fft.irfftn(
+                deltaB_locmean,
+                norm="forward",
+                axes=(-3,-2,-1),
+                s=self.system.full_unpadded_tuple,
+            )
+
+            grad_deltaB_locfluc_realspace = cp.fft.irfftn(
+                grad_deltaB_locfluc,
+                norm="forward",
+                axes=(-3,-2,-1),
+                s=self.system.full_unpadded_tuple,
+            )
+
+            B_locmean_realspace = deltaB_locmean_realspace
+            B_locmean_realspace[0] = cp.ones_like(B_locmean_realspace[0])
+
+            nl_term_realspace = cp.einsum('ilmn,ijlmn->jlmn',B_locmean_realspace,grad_deltaB_locfluc_realspace)
+
+            nl_term = cp.fft.rfftn(
+                nl_term_realspace,
+                norm="forward",
+                axes = (-3,-2,-1),
+            )
+
+            nl_term_sqrd = cp.einsum('ijkm,ijkm->jkm',nl_term,nl_term)
+
+            nl_term_sqrd_limited = cp.where(
+                (cp.sqrt(kx**2 + ky**2) < kperp_single + 1) & (cp.sqrt(kx**2 + ky**2) >= kperp_single),
+                nl_term_sqrd,
+                cp.zeros_like(nl_term_sqrd)
+            )
+            
+            deltaB_locfluc_sqrd = cp.einsum('ijkm,ijkm->jkm',deltaB_locfluc,deltaB_locfluc)
+
+            deltaB_locfluc_sqrd_limited = cp.where(
+                (cp.sqrt(kx**2 + ky**2) < kperp_single + 1) & (cp.sqrt(kx**2 + ky**2) >= kperp_single),
+                deltaB_locfluc_sqrd,
+                cp.zeros_like(deltaB_locfluc_sqrd)
+            )
+
+            kpar[i] = cp.sqrt(
+                cp.sum(nl_term_sqrd_limited)/cp.sum(deltaB_locfluc_sqrd_limited)
+            )
+
+        self.save_data('kpar',kpar.get())
+
+
+
+
+
+
+    #have to do .get() into save_data
+    #move things from this function into init_vars
