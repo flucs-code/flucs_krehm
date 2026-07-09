@@ -1899,15 +1899,7 @@ class CL04Anisotropy(FlucsDiagnostic):
         pass
 
     def execute(self) -> None:
-        # if self.compute_on_gpu:
-        #     self.system.get_realspace_fields_gpu()
-        # else:
-        #     self.system.get_realspace_fields_cpu()
-
-        # current_dt = self.system.float(self.system.current_dt)
-        # current_step = self.system.int(self.system.current_step)
-        # adaptive_rate = self.system.float(self.system.adaptive_rate)
-
+        
         fields = self.system.fields[
             self.system.current_step % self.system.fields_history_size
         ]
@@ -1994,10 +1986,3 @@ class CL04Anisotropy(FlucsDiagnostic):
 
         self.save_data('kpar',kpar.get())
 
-
-
-
-
-
-    #have to do .get() into save_data
-    #move things from this function into init_vars
