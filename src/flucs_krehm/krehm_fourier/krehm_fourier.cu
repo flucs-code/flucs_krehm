@@ -18,7 +18,9 @@ __constant__ FLUCS_COMPLEX* multistep_nonlinear_terms = NULL;
 // Fetches the linear matrix for a given mode
 __device__ void get_linear_matrix(
     const size_t index, 
-    const FLUCS_FLOAT dt, 
+    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT current_time,
+    const long long current_step, 
     FLUCS_COMPLEX matrix[2][2]
 ){
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -198,6 +200,9 @@ __global__ void find_nonlinear_bits(
 // Returns the nonlinear terms for a given mode
 __device__ void add_nonlinear_terms(
     const size_t index,
+    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT current_time,
+    const long long current_step,
     const FLUCS_COMPLEX* dft_bits,
     FLUCS_COMPLEX* explicit_terms
 ){
@@ -398,6 +403,7 @@ __device__ __forceinline__
 void add_forcing_elsasser(
     const size_t index,
     const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT current_time,
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
     FLUCS_COMPLEX explicit_terms[2]
@@ -484,6 +490,7 @@ __device__ __forceinline__
 void add_forcing_meyrand(
     const size_t index,
     const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT current_time,
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
     FLUCS_COMPLEX explicit_terms[2]
@@ -571,20 +578,21 @@ void add_forcing_meyrand(
 
 __device__ void add_forcing_explicit(
     const size_t index,
-    const FLUCS_FLOAT dt, 
+    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT current_time, 
     const long long current_step,
     const FLUCS_COMPLEX* previous_fields,
     FLUCS_COMPLEX explicit_terms[2] 
 ){
     #if defined(FORCING_METHOD_ELSASSER)
         add_forcing_elsasser(
-            index, dt, current_step, previous_fields, explicit_terms
+            index, dt, current_time, current_step, previous_fields, explicit_terms
         );
     #endif
 
     #if defined(FORCING_METHOD_MEYRAND)
         add_forcing_meyrand(
-            index, dt, current_step, previous_fields, explicit_terms
+            index, dt, current_time, current_step, previous_fields, explicit_terms
         );
     #endif
 }
@@ -709,6 +717,7 @@ struct FreeEnergyUpar_Functor {
 struct FreeEnergyForcing_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
     const long long current_step;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
@@ -720,7 +729,7 @@ struct FreeEnergyForcing_Functor {
         FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
-            index, dt, current_step, fields, forcing_terms
+            index, dt, current_time, current_step, fields, forcing_terms
         );
 #endif
 
@@ -748,6 +757,9 @@ struct FreeEnergyForcing_Functor {
 
 struct FreeEnergyNonlinear_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
+    const long long current_step;
     const FLUCS_COMPLEX* dft_bits;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -759,7 +771,9 @@ struct FreeEnergyNonlinear_Functor {
         // Nonlinear terms
         FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
-        add_nonlinear_terms(index, dft_bits, nonlinear_terms);
+        add_nonlinear_terms(
+            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+        );
 #endif
 
         // Indices and wavenumbers
@@ -841,6 +855,7 @@ struct FreeEnergyThetap_Functor {
 struct FreeEnergyThetapForcing_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -849,7 +864,7 @@ struct FreeEnergyThetapForcing_Functor {
         FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
-            index, dt, current_step, fields, forcing_terms
+            index, dt, current_time, current_step, fields, forcing_terms
         );
 #endif
 
@@ -866,6 +881,9 @@ struct FreeEnergyThetapForcing_Functor {
 
 struct FreeEnergyThetapNonlinear_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
+    const long long current_step;
     const FLUCS_COMPLEX* dft_bits;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -873,7 +891,9 @@ struct FreeEnergyThetapNonlinear_Functor {
         // Nonlinear terms
         FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
-        add_nonlinear_terms(index, dft_bits, nonlinear_terms);
+        add_nonlinear_terms(
+            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+        );
 #endif
 
         // Physical rates due to nonlinear terms
@@ -938,6 +958,7 @@ struct FreeEnergyThetam_Functor {
 struct FreeEnergyThetamForcing_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -946,7 +967,7 @@ struct FreeEnergyThetamForcing_Functor {
         FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
-            index, dt, current_step, fields, forcing_terms
+            index, dt, current_time, current_step, fields, forcing_terms
         );
 #endif
 
@@ -963,6 +984,9 @@ struct FreeEnergyThetamForcing_Functor {
 
 struct FreeEnergyThetamNonlinear_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
+    const long long current_step;
     const FLUCS_COMPLEX* dft_bits;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -970,7 +994,9 @@ struct FreeEnergyThetamNonlinear_Functor {
         // Nonlinear terms
         FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
-        add_nonlinear_terms(index, dft_bits, nonlinear_terms);
+        add_nonlinear_terms(
+            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+        );
 #endif
 
         // Physical rates due to nonlinear terms
@@ -1112,7 +1138,9 @@ struct HelicityUpar_Functor {
 struct HelicityForcing_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
     const long long current_step;
+
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
@@ -1123,7 +1151,7 @@ struct HelicityForcing_Functor {
         FLUCS_COMPLEX forcing_terms[2] = {0};
 #ifdef FORCING_EXPLICIT
         add_forcing_explicit(
-            index, dt, current_step, fields, forcing_terms
+            index, dt, current_time, current_step, fields, forcing_terms
         );
 #endif
 
@@ -1153,6 +1181,9 @@ struct HelicityForcing_Functor {
 
 struct HelicityNonlinear_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
+    const long long current_step;
     const FLUCS_COMPLEX* dft_bits;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1164,7 +1195,9 @@ struct HelicityNonlinear_Functor {
         // Nonlinear terms
         FLUCS_COMPLEX nonlinear_terms[2] = {0};
 #ifdef NONLINEAR
-        add_nonlinear_terms(index, dft_bits, nonlinear_terms);
+        add_nonlinear_terms(
+            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+        );
 #endif
 
         // Indices and wavenumbers
@@ -1241,6 +1274,7 @@ struct HelicityThetap_Functor {
 struct HelicityThetapForcing_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1258,13 +1292,16 @@ struct HelicityThetapForcing_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetapForcing_Functor{
-            fields, dt, current_step
+            fields, dt, current_time, current_step
         }(index) / vphase;
     }
 };
 
 struct HelicityThetapNonlinear_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
+    const long long current_step;
     const FLUCS_COMPLEX* dft_bits;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1282,7 +1319,7 @@ struct HelicityThetapNonlinear_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetapNonlinear_Functor{
-            fields, dft_bits
+            fields, dt, current_time, current_step, dft_bits
         }(index) / vphase;
     }
 };
@@ -1338,6 +1375,7 @@ struct HelicityThetam_Functor {
 struct HelicityThetamForcing_Functor {
     const FLUCS_COMPLEX* fields;
     const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1355,13 +1393,16 @@ struct HelicityThetamForcing_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetamForcing_Functor{
-            fields, dt, current_step
+            fields, dt, current_time, current_step
         }(index) / vphase;
     }
 };
 
 struct HelicityThetamNonlinear_Functor {
     const FLUCS_COMPLEX* fields;
+    const FLUCS_FLOAT dt;
+    const FLUCS_FLOAT current_time;
+    const long long current_step;
     const FLUCS_COMPLEX* dft_bits;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1379,7 +1420,7 @@ struct HelicityThetamNonlinear_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetamNonlinear_Functor{
-            fields, dft_bits
+            fields, dt, current_time, current_step, dft_bits
         }(index) / vphase;
     }
 };
