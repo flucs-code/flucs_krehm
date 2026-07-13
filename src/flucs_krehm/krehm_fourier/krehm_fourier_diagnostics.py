@@ -1899,7 +1899,7 @@ class CL04Anisotropy(FlucsDiagnostic):
         pass
 
     def execute(self) -> None:
-        
+
         fields = self.system.fields[
             self.system.current_step % self.system.fields_history_size
         ]
@@ -1985,4 +1985,344 @@ class CL04Anisotropy(FlucsDiagnostic):
             )
 
         self.save_data('kpar',kpar.get())
+
+class StructureFunctionDiag(FlucsDiagnostic):
+    """
+    Computes structure functions of the fields in real space.
+
+    Uses the same formatting as the RealspaceDataDiag locations.
+    """
+
+    name = "struct_func"
+    system: KREHMFourier
+    option_defaults: ClassVar[dict[str, object]] = {
+        "difference_locations": list(),
+        "orders": [2,3,4],
+        "number_points": int(1e5),
+        "compute_on_gpu": True,
+    }
+
+    slice_calculators: list[Callable[[], None]]
+
+
+    def init_vars(self) -> None:
+
+        def parse_slice(s: str) -> slice:
+            # Check if slice syntax or just a single index
+            if ":" not in s:
+                index = int(s.strip())
+                return slice(index, index + 1)
+
+            parts = s.split(":")
+            if len(parts) > 3:
+                raise ValueError(f"Invalid slice string: {s}")
+
+            def get_index(x):
+                return None if x == "" else int(x)
+
+            return slice(*(get_index(p) for p in parts))
+        
+        rng = cp.random.default_rng()
+        izs = rng.choice(cp.arange(self.system.full_unpadded_tuple[0]),size=self.number_points)
+        ixs = rng.choice(cp.arange(self.system.full_unpadded_tuple[1]),size=self.number_points)
+        iys = rng.choice(cp.arange(self.system.full_unpadded_tuple[2]),size=self.number_points)
+
+        for location in self.difference_locations:
+            for order in self.orders:
+                loc = ",".join(part.strip() for part in location.split(","))
+                loc_name = f"location_{loc}"
+                try:
+                    loc_parts = loc.split(",")
+
+                    ifield = parse_slice(loc_parts[0])
+                    iz_lambda = parse_slice(loc_parts[1])
+                    ix_lambda = parse_slice(loc_parts[2])
+                    iy_lambda = parse_slice(loc_parts[3])
+
+                except (IndexError, ValueError):
+                    raise ValueError(
+                        f"'{loc}' is not a valid realspace location. "
+                        r"The correct location format is '(ifield, iz, ix, iy)' "
+                        r"where the indices are integers or slices 'a:b:c'."
+                    )
+
+                dimensions = {
+                    f"{loc_name}/field": cp.arange(self.system.number_of_fields)[
+                        ifield
+                    ],
+                    f"{loc_name}/lambda_z": cp.linspace(
+                        0,
+                        self.system.input["dimensions.Lz"],
+                        self.system.nz,
+                        endpoint=False,
+                    )[iz_lambda],
+                    f"{loc_name}/lambda_x": cp.linspace(
+                        0,
+                        self.system.input["dimensions.Lx"],
+                        self.system.nx,
+                        endpoint=False,
+                    )[ix_lambda],
+                    f"{loc_name}/lambda_y": cp.linspace(
+                        0,
+                        self.system.input["dimensions.Ly"],
+                        self.system.ny,
+                        endpoint=False,
+                    )[iy_lambda],
+                }
+
+                self.add_var(
+                    FlucsDiagnosticVariable(
+                        name=f"{loc_name}/order/data",
+                        shape=("field", "z", "x", "y"),
+                        dimensions=dimensions,
+                        is_complex=False,
+                    )
+                )
+
+
+            def slice_calculator(
+                loc_name=loc_name,
+                orders=self.orders,
+                ifield=ifield,
+                iz=iz_lambda,
+                ix=ix_lambda,
+                iy=iy_lambda,
+            ):
+                fields = self.system.realspace_fields
+                nf, nz, nx, ny = ifield.size, iz_lambda.size, ix_lambda.size, iy_lambda.size
+                accs = {p: cp.zeros((nf, nz, nx, ny)) for p in orders}
+                budget = 512 * 1024**2
+                bytes_per_point = nf * nz * nx * ny * fields.dtype.itemsize
+                chunk = max(1, budget // (2 * bytes_per_point))
+
+                for s in range(0, self.number_points, chunk):
+                    zc, xc, yc = izs[s:s+chunk], ixs[s:s+chunk], iys[s:s+chunk]
+
+                    diff = fields[
+                        ifield[None, :, None, None, None],
+                        ((zc[:, None] + iz_lambda)[:, None, :, None, None]) % self.system.nz,
+                        ((xc[:, None] + ix_lambda)[:, None, None, :, None]) % self.system.nx,
+                        ((yc[:, None] + iy_lambda)[:, None, None, None, :]) % self.system.ny,
+                    ]                                                          # (p, nf, nz, nx, ny)
+
+                    centers = fields[ifield[None, :], zc[:, None], xc[:, None], yc[:, None]]   # (p, nf)
+                    diff -= centers[:, :, None, None, None]
+                    mag = cp.abs(diff)
+                    for p in orders:
+                        accs[p] += (mag ** p).sum(axis=0)
+
+                for p in orders:
+                    structure_fn = accs[p] / self.number_points    
+
+                    self.vars[f"{loc_name}/{p}/data"].data_cache.append(
+                        structure_fn
+                    )
+
+            self.slice_calculators.append(slice_calculator)
+
+    def ready(self) -> None:
+        pass
+    
+    def execute(self) -> None:
+        if self.compute_on_gpu:
+            self.system.get_realspace_fields_gpu()
+        else:
+            self.system.get_realspace_fields_cpu()
+
+        for slice_calculator in self.slice_calculators:
+            slice_calculator()
+            
+
+        
+
+class StructureFunctionDiag1D(FlucsDiagnostic):
+    """
+    Computes structure functions of the fields in real space in 1D.
+
+    The only new functionality from StructureFunctionDiag is the ability to calculate structure functions in the perpendicular direction.
+    """
+
+    name = "struct_func_1d"
+    system: KREHMFourier
+    option_defaults: ClassVar[dict[str, object]] = {
+        "directions": ["lperp"],
+        "fields": [0,1],
+        "orders": [2,3,4],
+        "number_points": int(1e5),
+        "compute_on_gpu": True,
+    }
+
+    slice_calculators: list[Callable[[], None]]
+
+
+    def init_vars(self) -> None:
+
+        valid_directions = ("lz", "lx", "ly", "lperp")#TODO: add lpar functionality
+        directions = self.directions
+        if isinstance(directions, str):
+            directions = [directions]
+        directions = tuple(dict.fromkeys(directions))
+
+        invalid_directions = set(directions) - set(valid_directions)
+        if invalid_directions:
+            raise ValueError(
+                f"{self.name} only supports 1D spectra {valid_directions}."
+            )
+        
+        
+        rng = cp.random.default_rng()
+        self.izs = rng.choice(cp.arange(self.system.full_unpadded_tuple[0]),size=self.number_points)
+        self.ixs = rng.choice(cp.arange(self.system.full_unpadded_tuple[1]),size=self.number_points)
+        self.iys = rng.choice(cp.arange(self.system.full_unpadded_tuple[2]),size=self.number_points)
+
+        for direction in self.directions:
+            for order in self.orders:
+                for field in self.fields:
+
+                    match direction:
+                        case 'lz':
+                            lz = cp.linspace(
+                                0,
+                                self.system.input["dimensions.Lz"],
+                                self.system.nz,
+                                endpoint=False,
+                            )
+
+                            dimensions = {'lz': lz}
+                            shape = tuple(dimensions)
+
+                            self.add_var(
+                                FlucsDiagnosticVariable(
+                                    name=f"{direction}/{order}",
+                                    shape=shape,
+                                    dimensions=dimensions,
+                                    is_complex=False,
+                                )
+                            )
+                        case 'lperp':
+                            self.lx = cp.linspace(
+                                0,
+                                self.system.input["dimensions.Lx"],
+                                self.system.nx,
+                                endpoint=False,
+                            )
+                            self.ly = cp.linspace(
+                                0,
+                                self.system.input["dimensions.Ly"],
+                                self.system.ny,
+                                endpoint=False,
+                            )
+                            dlperp = min(
+                                (l[1] for l in (lx,ly)),
+                            )
+                            lperp_min = self.system.float(0.0)
+                            lx_max = abs(lx[self.system.nx - 1])
+                            ly_max = abs(lx[self.system.ny - 1])
+                            lperp_max = cp.sqrt(lx_max**2+ly_max**2)
+                            lperp_max += dlperp
+                            nlperp = int(cp.ceil((lperp_max-lperp_min)/dlperp))
+                            bin_width = dlperp
+                            lperp_max = self.system.float(lperp_min + nlperp * bin_width)
+                            self.lperp = lperp_min + bin_width * cp.arange(nlperp,dtype=self.system.float)
+
+                            dimensions = {'lperp': self.lperp}
+                            shape = tuple(dimensions)
+                            self.add_var(
+                                FlucsDiagnosticVariable(
+                                    name=f"{direction}/{order}",
+                                    shape=shape,
+                                    dimensions=dimensions,
+                                    is_complex=False,
+                                )
+                            )
+
+
+
+
+    def ready(self) -> None:
+        pass
+    
+    def execute(self) -> None:
+        if self.compute_on_gpu:
+            self.system.get_realspace_fields_gpu()
+        else:
+            self.system.get_realspace_fields_cpu()
+
+        for direction in self.directions:
+            for field in self.fields:
+                field_realspace = self.system.realspace_fields[field]
+
+                match direction:
+                    case "lz":
+                        ilz = cp.arange(self.system.nz)
+                        diff = field_realspace[
+                            self.izs[:,None] +ilz[None,:],
+                            self.ixs[:,None],
+                            self.iys[:,None] 
+                        ]
+                        print(f'RISHIN ALERT: {diff.shape} should be (num_points,nz)')
+
+                        centers = field_realspace[
+                            self.izs[:,None],
+                            self.ixs[:,None],
+                            self.iys[:,None]
+                        ]
+
+                        diff -= centers
+                        mag = cp.abs(diff)
+                        for p in self.orders:
+                            acc = (mag**p).sum(axis=0)
+                            self.save_data(
+                                f"{direction}/{p}",
+                                acc.get()
+                            )
+                    
+                    case "lperp":
+                        ilx = cp.arange(self.system.nx)
+                        ily = cp.arange(self.system.ny)
+
+                        diff = field_realspace[
+                            self.izs[:,None,None],
+                            self.ixs[:,None,None] + ilx[None,:,None],
+                            self.iys[:,None,None] + ily[None,None,:]
+                        ]
+
+                        centers = field_realspace[
+                            self.izs,
+                            self.ixs,
+                            self.iys
+                        ]
+                        diff -= centers[:,None,None]
+                        mag = cp.abs(diff)
+                        
+                    
+                        Lx,Ly = cp.meshgrid(self.lx,self.ly,indexing='ij')
+                        R = cp.sqrt(Lx**2 + Ly**2)
+                        idx = cp.searchsorted(self.lperp,R,side='left')
+                        valid = idx < self.lperp.size
+                        bins = idx[valid]
+                        counts = cp.bincount(bins,minlength=self.lperp.size)
+
+                        for p in self.orders:
+                            w = (mag**p).sum(axis=0)  
+                            sums = cp.bincount(bins, weights=w[valid], minlength=self.lperp.size)
+                        self.save_data(f"{direction}/{p}", (sums / counts).get())
+
+
+                            
+
+
+
+
+
+
+
+
+                
+
+
+            
+
+
+
 
