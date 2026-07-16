@@ -2325,35 +2325,11 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
 
                             for p in self.orders:
                                 cp.power(mag,p,out=pow_buf)
-                                acc[p] += pow_buf.sum(axis=0)
+                                acc[p] += pow_buf
 
                         for p in self.orders:
                             sums = cp.bincount(bins,weights=acc[p],minlength = self.lperp.size)
-                            self.save_data(f"{field}/{direction}/{p}", (sums / counts).get())
-
-
-
-                        # diff = field_realspace[
-                        #     self.izs[:,None,None],
-                        #     self.ixs[:,None,None] + ilx[None,:,None],
-                        #     self.iys[:,None,None] + ily[None,None,:]
-                        # ]
-
-                        # centers = field_realspace[
-                        #     self.izs,
-                        #     self.ixs,
-                        #     self.iys
-                        # ]
-                        # diff -= centers[:,None,None]
-                        # mag = cp.abs(diff)
-                        
-                    
-
-
-                        # for p in self.orders:
-                        #     w = (mag**p).sum(axis=0)  
-                        #     sums = cp.bincount(bins, weights=w[valid], minlength=self.lperp.size)
-                        #     self.save_data(f"{field_realspace}/{direction}/{p}", (sums / counts).get())
+                            self.save_data(f"{field}/{direction}/{p}", (sums / (counts * self.number_points)).get())
 
 
                             
