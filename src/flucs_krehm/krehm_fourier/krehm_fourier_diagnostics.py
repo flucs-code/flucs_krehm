@@ -1883,8 +1883,6 @@ class CL04Anisotropy(FlucsDiagnostic):
         "compute_on_gpu": True,
     }
 
-
-
     def init_vars(self) -> None:
         #TODO: generalise to KREHM
         if not self.system.input["parameters.ermhd"]:
@@ -2028,10 +2026,7 @@ class StructureFunctionDiag(FlucsDiagnostic):
 
             return slice(*(get_index(p) for p in parts))
         
-        rng = cp.random.default_rng()
-        izs = rng.integers(0,self.system.full_unpadded_tuple[0],size=self.number_points)
-        ixs = rng.integers(0,self.system.full_unpadded_tuple[1],size=self.number_points)
-        iys = rng.integers(0,self.system.full_unpadded_tuple[2],size=self.number_points)
+        izs,ixs,iys = generate_random_gridpoints_in_realspace(self.number_points,self.system)
 
         for location in self.difference_locations:
             for order in self.orders:
@@ -2143,7 +2138,26 @@ class StructureFunctionDiag(FlucsDiagnostic):
             slice_calculator()
             
 
-        
+def calculate_lperp(lx,ly,system):
+    dlperp = min(
+        (l[1] for l in (lx,ly)),
+    )
+    lperp_min = system.float(0.0)
+    lx_max = abs(lx[system.nx - 1])
+    ly_max = abs(ly[system.ny - 1])
+    lperp_max = cp.sqrt(lx_max**2+ly_max**2)
+    lperp_max += dlperp
+    nlperp = int(cp.ceil((lperp_max-lperp_min)/dlperp))
+    bin_width = dlperp
+    lperp_max = system.float(lperp_min + nlperp * bin_width)
+    return lperp_min + bin_width * cp.arange(nlperp,dtype=system.float)
+
+def generate_random_gridpoints_in_realspace(number_points,system):
+    rng = cp.random.default_rng()
+    izs = rng.integers(0,system.nz,size=number_points)
+    ixs = rng.integers(0,system.nx,size=number_points)
+    iys = rng.integers(0,system.ny,size=number_points)
+    return izs, ixs, iys
 
 class StructureFunctionDiag1D(FlucsDiagnostic):
     """
@@ -2167,7 +2181,7 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
 
     def init_vars(self) -> None:
 
-        valid_directions = ("lz", "lx", "ly", "lperp")#TODO: add lpar functionality
+        valid_directions = ("lz", "lperp")#TODO: add lpar,ly,lz functionality
         directions = self.directions
         if isinstance(directions, str):
             directions = [directions]
@@ -2176,14 +2190,12 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
         invalid_directions = set(directions) - set(valid_directions)
         if invalid_directions:
             raise ValueError(
-                f"{self.name} only supports 1D spectra {valid_directions}."
+                f"{self.name} only supports 1D spectra {valid_directions}. ly and lx are yet to be added."
             )
         
         
-        rng = cp.random.default_rng()
-        self.izs = rng.integers(0,self.system.full_unpadded_tuple[0],size=self.number_points)
-        self.ixs = rng.integers(0,self.system.full_unpadded_tuple[1],size=self.number_points)
-        self.iys = rng.integers(0,self.system.full_unpadded_tuple[2],size=self.number_points)
+        self.izs,self.ixs,self.iys = generate_random_gridpoints_in_realspace(self.number_points,self.system)
+
 
         for direction in self.directions:
 
@@ -2195,19 +2207,9 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
                         self.system.nz,
                         endpoint=False,
                     )
-
                     dimensions = {'lz': lz.get()}
                     shape = tuple(dimensions)
-                    for order in self.orders:
-                        for field in self.fields:
-                            self.add_var(
-                                FlucsDiagnosticVariable(
-                                    name=f"{field}/{direction}/{order}",
-                                    shape=shape,
-                                    dimensions=dimensions,
-                                    is_complex=False,
-                                )
-                            )
+
                 case 'lperp':
                     self.lx = cp.linspace(
                         0,
@@ -2221,34 +2223,20 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
                         self.system.ny,
                         endpoint=False,
                     )
-                    dlperp = min(
-                        (l[1] for l in (self.lx,self.ly)),
-                    )
-                    lperp_min = self.system.float(0.0)
-                    lx_max = abs(self.lx[self.system.nx - 1])
-                    ly_max = abs(self.ly[self.system.ny - 1])
-                    lperp_max = cp.sqrt(lx_max**2+ly_max**2)
-                    lperp_max += dlperp
-                    nlperp = int(cp.ceil((lperp_max-lperp_min)/dlperp))
-                    bin_width = dlperp
-                    lperp_max = self.system.float(lperp_min + nlperp * bin_width)
-                    self.lperp = lperp_min + bin_width * cp.arange(nlperp,dtype=self.system.float)
-
+                    self.lperp = calculate_lperp(self.lx,self.ly,self.system)
                     dimensions = {'lperp': self.lperp.get()}
                     shape = tuple(dimensions)
-                    for order in self.orders:
-                        for field in self.fields:
-                            self.add_var(
-                                FlucsDiagnosticVariable(
-                                    name=f"{field}/{direction}/{order}",
-                                    shape=shape,
-                                    dimensions=dimensions,
-                                    is_complex=False,
-                                )
-                            )
 
-
-
+            for order in self.orders:
+                for field in self.fields:
+                    self.add_var(
+                        FlucsDiagnosticVariable(
+                            name=f"{field}/{direction}/{order}",
+                            shape=shape,
+                            dimensions=dimensions,
+                            is_complex=False,
+                        )
+                    )
 
     def ready(self) -> None:
         pass
@@ -2307,7 +2295,6 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
                         ily_v = ily[valid]
                         acc = {p: cp.zeros(ilx_v.size, dtype=cp.float64) for p in self.orders}
 
-
                         pow_buf = None
 
                         for ipt in range(self.number_points):
@@ -2337,20 +2324,271 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
                             self.save_data(f"{field}/{direction}/{p}", (sums / (counts * self.number_points)).get())
 
 
-                            
+class AlignmentDiag(FlucsDiagnostic):
+    """
+    Computes alignment angle quanitites, for cos(theta) = <|delta z_1 x delta z_2|>/ <|delta z1||delta z2|>, where z1 and z2 are fields. 
+    The numerator and denominator are saved separately (so they can be time averaged in post).
+    """
+    name = "alignment_angle"
+    system: KREHMFourier
+    option_defaults: ClassVar[dict[str, object]] = {
+        "directions": ["lperp"],
+        "angle_between": ["zp_zm","gradBpar_Bperp","Bperp_gradLaplacianBperp"],
+        "number_points": int(1e5),
+    }
+
+    def init_vars(self):
+        valid_directions = ("lz", "lperp")#TODO: add lpar,ly,lz functionality
+        directions = self.directions
+        if isinstance(directions, str):
+            directions = [directions]
+        directions = tuple(dict.fromkeys(directions))
+
+        invalid_directions = set(directions) - set(valid_directions)
+        if invalid_directions:
+            raise ValueError(
+                f"{self.name} only supports 1D spectra {valid_directions}. ly and lx are yet to be added."
+            )
+        
+        valid_angle_between = ("zp_zm","gradBpar_Bperp","Bperp_gradLaplacianBperp")
+        angle_between = self.angle_between
+        if isinstance(angle_between, str):
+            angle_between = [angle_between]
+        angle_between = tuple(dict.fromkeys(angle_between))
+
+        invalid_angle_between = set(angle_between) - set(valid_angle_between)
+        if invalid_angle_between:
+            raise ValueError(
+                f"{self.name} only supports the following field options {valid_angle_between}."
+            )
+        
+        self.izs,self.ixs,self.iys = generate_random_gridpoints_in_realspace(self.number_points,self.system)
 
 
+        for direction in self.directions:
+            match direction:
+                case 'lz':
+                    lz = cp.linspace(
+                        0,
+                        self.system.input["dimensions.Lz"],
+                        self.system.nz,
+                        endpoint=False,
+                    )
+
+                    dimensions = {'lz': lz.get()}
+                    shape = tuple(dimensions)
+                    for angle_between in self.angle_between:
+                        self.add_var(
+                            FlucsDiagnosticVariable(
+                                name=f"{angle_between}/{direction}/numerator",
+                                shape=shape,
+                                dimensions=dimensions,
+                                is_complex=False,
+                            )
+                        )
+                        self.add_var(
+                            FlucsDiagnosticVariable(
+                                name=f"{angle_between}/{direction}/denominator",
+                                shape=shape,
+                                dimensions=dimensions,
+                                is_complex=False,
+                            )
+                        )
+                case 'lperp':
+                    self.lx = cp.linspace(
+                        0,
+                        self.system.input["dimensions.Lx"],
+                        self.system.nx,
+                        endpoint=False,
+                    )
+                    self.ly = cp.linspace(
+                        0,
+                        self.system.input["dimensions.Ly"],
+                        self.system.ny,
+                        endpoint=False,
+                    )
+                    
+                    self.lperp = calculate_lperp(self.lx,self.ly,self.system)
+
+                    dimensions = {'lperp': self.lperp.get()}
+                    shape = tuple(dimensions)
+                    for angle_between in self.angle_between:
+                        self.add_var(
+                            FlucsDiagnosticVariable(
+                                name=f"{angle_between}/{direction}/numerator",
+                                shape=shape,
+                                dimensions=dimensions,
+                                is_complex=False,
+                            )
+                        )
+                        self.add_var(
+                            FlucsDiagnosticVariable(
+                                name=f"{angle_between}/{direction}/denominator",
+                                shape=shape,
+                                dimensions=dimensions,
+                                is_complex=False,
+                            )
+                        )
+
+    
+    def ready(self):
+        pass
+
+    def get_relevant_fields(self,angle_between):
+        fields = self.system.fields[
+            self.system.current_step % self.system.fields_history_size
+        ]
+        kx, ky, kz = self.system.get_broadcast_wavenumbers()
+        kx = cp.asarray(kx)
+        ky = cp.asarray(ky)
+        kz = cp.asarray(kz)
+        match angle_between:
+            case 'zp_zm':
+                thetap,thetam = self.system.compute_thetas_from_fields(
+                    fields[0],
+                    fields[1]
+                )
 
 
+                field1 = cp.stack([-1j*ky*thetap,1j*kx*thetap,cp.zeros_like(thetap)],axis=0)
+                field2 = cp.stack([-1j*ky*thetam,1j*kx*thetam,cp.zeros_like(thetam)],axis=0)
 
+            case 'gradBpar_Bperp':
+                if not self.system.input["parameters.ermhd"]:
+                    raise Exception("not configured for isothermal KREHM, only ERMHD")
+                
+                phi = fields[0]
+                apar = fields[1]
 
+                deltaBz = cp.sqrt(2) * phi
+                deltaBx = 1j * ky * apar
+                deltaBy = - 1j * kx * apar
 
+                field1 = 1j * cp.stack([kx * deltaBz,ky * deltaBz,cp.zeros_like(deltaBz)],axis=0)
 
+                field2 = cp.stack([deltaBx,deltaBy,cp.zeros_like(deltaBx)],axis=0)
+            case 'Bperp_gradLaplacianBperp':
+                if not self.system.input["parameters.ermhd"]:
+                    raise Exception("not configured for isothermal KREHM, only ERMHD")
+                apar = fields[1]
+                deltaBx = 1j * ky * apar
+                deltaBy = - 1j * kx * apar
+                laplacian_apar = - (kx**2 + ky**2) * apar
+                field1 = cp.stack([deltaBx,deltaBy,cp.zeros_like(deltaBx)],axis=0)
+
+                field2 = 1j * cp.stack([kx * laplacian_apar, ky * laplacian_apar,cp.zeros_like(laplacian_apar)],axis=0)
+
+        field1_realspace = cp.fft.irfftn(
+            field1,
+            norm="forward",
+            axes=(1, 2, 3),
+            s=self.system.full_unpadded_tuple,
+        )
+        field2_realspace = cp.fft.irfftn(
+            field2,
+            norm="forward",
+            axes=(1, 2, 3),
+            s=self.system.full_unpadded_tuple,
+        )
+
+        return field1_realspace, field2_realspace
+        
                 
 
 
-            
+    
+    def execute(self):
+                                    
+        for direction in self.directions:
+            for angle_between in self.angle_between:
+                vec_field1,vec_field2 = self.get_relevant_fields(angle_between) #fields should have shape (3,nx,ny,nz) 
+                match direction:
+                    case 'lz':
+                        ilz = cp.arange(self.system.nz)
 
+                        diff1 = vec_field1[
+                            :,
+                            (self.izs[:,None] +ilz[None,:]) % self.system.nz,
+                            self.ixs[:,None],
+                            self.iys[:,None] 
+                        ]
+                        centers1 = vec_field1[
+                            :,
+                            self.izs[:,None],
+                            self.ixs[:,None],
+                            self.iys[:,None]
+                        ]
+                        diff1 -= centers1
+
+
+                        diff2 = vec_field2[
+                            :,
+                            (self.izs[:,None] +ilz[None,:]) % self.system.nz,
+                            self.ixs[:,None],
+                            self.iys[:,None] 
+                        ]
+                        centers2 = vec_field2[
+                            :,
+                            self.izs[:,None],
+                            self.ixs[:,None],
+                            self.iys[:,None]
+                        ]
+                        diff2 -= centers2
+                        print(f'RISHIN ALERT: {diff2.shape} should be (3,number_points,nz)')
+
+                    case 'lperp':
+                        Lx,Ly = cp.meshgrid(self.lx,self.ly,indexing='ij')
+                        R = cp.sqrt(Lx**2 + Ly**2)
+                        idx = cp.searchsorted(self.lperp,R,side='left')
+                        valid = idx < self.lperp.size
+                        bins = idx[valid]
+                        counts = cp.bincount(bins,minlength=self.lperp.size)
+
+                        ilx,ily = cp.meshgrid(
+                            cp.arange(self.system.nx),
+                            cp.arange(self.system.ny),
+                            indexing='ij'
+                        )
+
+                        ilx_v = ilx[valid]
+                        ily_v = ily[valid]
+
+
+                        for ipt in range(self.number_points):
+                            iz = self.izs[ipt]
+                            ix = self.ixs[ipt]
+                            iy = self.iys[ipt]
+
+                            diff1 = vec_field1[
+                                :,
+                                iz,
+                                (ix + ilx_v) % self.system.nx,
+                                (iy + ily_v) % self.system.ny,
+                            ]
+                            center1 = vec_field1[:,iz,ix,iy]
+                            diff1 -= center1
+
+                            diff2 = vec_field1[
+                                :,
+                                iz,
+                                (ix + ilx_v) % self.system.nx,
+                                (iy + ily_v) % self.system.ny,
+                            ]
+                            center2 = vec_field2[:,iz,ix,iy]
+                            diff2 -= center2
+
+
+
+                cross_product = cp.cross(diff1,diff2,axis=0)
+                cross_product_mag = cp.sqrt(cp.einsum('ijk,ijk->jk',cross_product,cross_product))
+                numerator = cross_product_mag.sum(axis=0)
+
+                diff1_mag = cp.sqrt(cp.einsum('ijk,ijk->jk',diff1,diff1))
+                diff2_mag = cp.sqrt(cp.einsum('ijk,ijk->jk',diff2,diff2))
+                denominator = (diff1_mag * diff2_mag).sum(axis=0)
+
+                self.save_data(f"{angle_between}/{direction}/numerator",numerator)
+                self.save_data(f"{angle_between}/{direction}/denominator",denominator)
 
 
 
