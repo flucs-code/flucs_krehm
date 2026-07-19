@@ -2142,15 +2142,11 @@ def calculate_lperp(lx,ly,system):
     dlperp = min(
         (l[1] for l in (lx,ly)),
     )
-    lperp_min = system.float(0.0)
     lx_max = abs(lx[system.nx - 1])
     ly_max = abs(ly[system.ny - 1])
     lperp_max = cp.sqrt(lx_max**2+ly_max**2)
-    lperp_max += dlperp
-    nlperp = int(cp.ceil((lperp_max-lperp_min)/dlperp))
-    bin_width = dlperp
-    lperp_max = system.float(lperp_min + nlperp * bin_width)
-    return lperp_min + bin_width * cp.arange(nlperp,dtype=system.float)
+    nlperp = int(cp.rint(lperp_max / dlperp).item()) + 1
+    return dlperp * cp.arange(nlperp,dtype=system.float)
 
 def generate_random_gridpoints_in_realspace(number_points,system):
     rng = cp.random.default_rng()
@@ -2280,10 +2276,15 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
 
                         Lx,Ly = cp.meshgrid(self.lx,self.ly,indexing='ij')
                         R = cp.sqrt(Lx**2 + Ly**2)
-                        idx = cp.searchsorted(self.lperp,R,side='left')
+                        dlperp = self.lperp[1] - self.lperp[0]
+                        idx = cp.rint(R / dlperp).astype(cp.int64)
                         valid = idx < self.lperp.size
                         bins = idx[valid]
                         counts = cp.bincount(bins,minlength=self.lperp.size)
+                        if bool((counts == 0).any()):
+                            raise ValueError(
+                                f"{self.name}: empty lperp shell(s) encountered."
+                            )
 
                         ilx,ily = cp.meshgrid(
                             cp.arange(self.system.nx),
@@ -2445,10 +2446,11 @@ class AlignmentDiag(FlucsDiagnostic):
         match angle_between:
             case 'zp_zm':
                 thetap,thetam = self.system.compute_thetas_from_fields(
-                    fields[0],
-                    fields[1]
+                    fields[0].get(),
+                    fields[1].get()
                 )
-
+                thetap = cp.asarray(thetap)
+                thetam = cp.asarray(thetam)
 
                 field1 = cp.stack([-1j*ky*thetap,1j*kx*thetap,cp.zeros_like(thetap)],axis=0)
                 field2 = cp.stack([-1j*ky*thetam,1j*kx*thetam,cp.zeros_like(thetam)],axis=0)
@@ -2498,10 +2500,9 @@ class AlignmentDiag(FlucsDiagnostic):
 
     
     def execute(self):
-                                    
-        for direction in self.directions:
-            for angle_between in self.angle_between:
-                vec_field1,vec_field2 = self.get_relevant_fields(angle_between) #fields should have shape (3,nx,ny,nz) 
+        for angle_between in self.angle_between:
+            vec_field1,vec_field2 = self.get_relevant_fields(angle_between) #fields should have shape (3,nx,ny,nz) 
+            for direction in self.directions:
                 match direction:
                     case 'lz':
                         ilz = cp.arange(self.system.nz)
@@ -2510,39 +2511,56 @@ class AlignmentDiag(FlucsDiagnostic):
                             :,
                             (self.izs[:,None] +ilz[None,:]) % self.system.nz,
                             self.ixs[:,None],
-                            self.iys[:,None] 
+                            self.iys[:,None]
                         ]
-                        centers1 = vec_field1[
+                        diff1 -= vec_field1[
                             :,
                             self.izs[:,None],
                             self.ixs[:,None],
                             self.iys[:,None]
                         ]
-                        diff1 -= centers1
-
 
                         diff2 = vec_field2[
                             :,
                             (self.izs[:,None] +ilz[None,:]) % self.system.nz,
                             self.ixs[:,None],
-                            self.iys[:,None] 
+                            self.iys[:,None]
                         ]
-                        centers2 = vec_field2[
+                        diff2 -= vec_field2[
                             :,
                             self.izs[:,None],
                             self.ixs[:,None],
                             self.iys[:,None]
                         ]
-                        diff2 -= centers2
-                        print(f'RISHIN ALERT: {diff2.shape} should be (3,number_points,nz)')
+
+                        cross_product = cp.cross(diff1, diff2, axis=0)
+                        cross_product_mag = cp.sqrt(
+                            cp.einsum('ijk,ijk->jk', cross_product, cross_product)
+                        )
+                        numerator = cross_product_mag.sum(axis=0) / self.number_points
+
+                        diff1_mag = cp.sqrt(cp.einsum('ijk,ijk->jk', diff1, diff1))
+                        diff2_mag = cp.sqrt(cp.einsum('ijk,ijk->jk', diff2, diff2))
+                        denominator = (
+                            (diff1_mag * diff2_mag).sum(axis=0) / self.number_points
+                        )
 
                     case 'lperp':
                         Lx,Ly = cp.meshgrid(self.lx,self.ly,indexing='ij')
                         R = cp.sqrt(Lx**2 + Ly**2)
-                        idx = cp.searchsorted(self.lperp,R,side='left')
+                        dlperp = self.lperp[1] - self.lperp[0]
+                        idx = cp.rint(R / dlperp).astype(cp.int64)
                         valid = idx < self.lperp.size
                         bins = idx[valid]
-                        counts = cp.bincount(bins,minlength=self.lperp.size)
+
+                        # Number of separation offsets in each shell; there
+                        # should be no empty shells.
+                        counts = cp.bincount(bins, minlength=self.lperp.size)
+                        if bool((counts == 0).any()):
+                            print(counts)
+                            raise ValueError(
+                                f"{self.name}: empty lperp shell(s) encountered."
+                            )
 
                         ilx,ily = cp.meshgrid(
                             cp.arange(self.system.nx),
@@ -2553,6 +2571,8 @@ class AlignmentDiag(FlucsDiagnostic):
                         ilx_v = ilx[valid]
                         ily_v = ily[valid]
 
+                        num_acc = cp.zeros(ilx_v.size, dtype=cp.float64)
+                        den_acc = cp.zeros(ilx_v.size, dtype=cp.float64)
 
                         for ipt in range(self.number_points):
                             iz = self.izs[ipt]
@@ -2565,30 +2585,41 @@ class AlignmentDiag(FlucsDiagnostic):
                                 (ix + ilx_v) % self.system.nx,
                                 (iy + ily_v) % self.system.ny,
                             ]
-                            center1 = vec_field1[:,iz,ix,iy]
-                            diff1 -= center1
+                            diff1 -= vec_field1[:, iz, ix, iy][:, None]
 
-                            diff2 = vec_field1[
+                            diff2 = vec_field2[
                                 :,
                                 iz,
                                 (ix + ilx_v) % self.system.nx,
                                 (iy + ily_v) % self.system.ny,
                             ]
-                            center2 = vec_field2[:,iz,ix,iy]
-                            diff2 -= center2
+                            diff2 -= vec_field2[:, iz, ix, iy][:, None]
+
+                            # diff1, diff2 have shape (3, ilx_v.size)
+                            cross_product = cp.cross(diff1, diff2, axis=0)
+                            num_acc += cp.sqrt(
+                                cp.einsum('ij,ij->j', cross_product, cross_product)
+                            )
+
+                            diff1_mag = cp.sqrt(cp.einsum('ij,ij->j', diff1, diff1))
+                            diff2_mag = cp.sqrt(cp.einsum('ij,ij->j', diff2, diff2))
+                            den_acc += diff1_mag * diff2_mag
 
 
+                        norm = counts * self.number_points
+                        numerator = cp.bincount(
+                            bins, weights=num_acc, minlength=self.lperp.size
+                        ) / norm
+                        denominator = cp.bincount(
+                            bins, weights=den_acc, minlength=self.lperp.size
+                        ) / norm
 
-                cross_product = cp.cross(diff1,diff2,axis=0)
-                cross_product_mag = cp.sqrt(cp.einsum('ijk,ijk->jk',cross_product,cross_product))
-                numerator = cross_product_mag.sum(axis=0)
-
-                diff1_mag = cp.sqrt(cp.einsum('ijk,ijk->jk',diff1,diff1))
-                diff2_mag = cp.sqrt(cp.einsum('ijk,ijk->jk',diff2,diff2))
-                denominator = (diff1_mag * diff2_mag).sum(axis=0)
-
-                self.save_data(f"{angle_between}/{direction}/numerator",numerator)
-                self.save_data(f"{angle_between}/{direction}/denominator",denominator)
+                self.save_data(
+                    f"{angle_between}/{direction}/numerator", numerator.get()
+                )
+                self.save_data(
+                    f"{angle_between}/{direction}/denominator", denominator.get()
+                )
 
 
 

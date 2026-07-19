@@ -23,7 +23,8 @@ from .krehm_fourier_diagnostics import (
     HelicityDiag1D,
     CL04Anisotropy,
     StructureFunctionDiag,
-    StructureFunctionDiag1D
+    StructureFunctionDiag1D,
+    AlignmentDiag
 )
 from .krehm_fourier_forcing import (
     KREHMFourierElsasserForcing,
@@ -56,7 +57,8 @@ class KREHMFourier(FourierSystem):
         HelicityDiag1D,
         CL04Anisotropy,
         StructureFunctionDiag,
-        StructureFunctionDiag1D
+        StructureFunctionDiag1D,
+        AlignmentDiag
     }
 
     # Supported forcing
