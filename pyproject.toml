@@ -7,7 +7,7 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["flucs"]
+dependencies = ["flucs", "scipy"]
 dynamic = ["version"]
 
 [build-system]
