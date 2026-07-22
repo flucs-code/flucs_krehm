@@ -1914,31 +1914,32 @@ class CL04Anisotropy(FlucsDiagnostic):
         kx = cp.asarray(kx)
         ky = cp.asarray(ky)
         kz = cp.asarray(kz)
+        kvec = cp.stack([kx,ky,kz],axis=0)
 
         nkperp = self.system.shell_nkperp
         kperp = cp.asarray(self.system.shell_kperp)
 
         kpar = cp.zeros(nkperp)
 
+        deltaBz = cp.sqrt(2) * phi
+        deltaBx = 1j * ky * apar
+        deltaBy = - 1j * kx * apar
+
+        deltaB = cp.stack([deltaBx,deltaBy,deltaBz],axis=0)
+        kperp_dash = cp.sqrt(kx[None,:,:,:]**2 + ky[None,:,:,:]**2)
+
+
         #done as loop because otherwise too much memory required
         #TODO: use CUDA kernel for speed
         for i,kperp_single in enumerate(kperp):
 
-            deltaBz = cp.sqrt(2) * phi
-            deltaBx = 1j * ky * apar
-            deltaBy = - 1j * kx * apar
 
-            deltaB = cp.stack([deltaBz,deltaBx,deltaBy],axis=0)
-
-
-            kperp_dash = cp.sqrt(kx[None,:,:,:]**2 + ky[None,:,:,:]**2)
             deltaB_locmean = cp.where(kperp_dash < kperp_single/2,deltaB,cp.zeros_like(deltaB))
-            deltaB_locmean[0] = cp.zeros_like(deltaB[0])#the z-component of mean-local field is just the guide field
+            deltaB_locmean[2] = cp.zeros_like(deltaB[0])#the z-component of mean-local field is just the guide field
 
 
             deltaB_locfluc = cp.where(kperp_dash > kperp_single/2,deltaB,cp.zeros_like(deltaB))
 
-            kvec = cp.stack([kx,ky,kz],axis=0)
             grad_deltaB_locfluc = 1j * cp.einsum('imln,jmln->ijmln',kvec,deltaB_locfluc)
 
 
@@ -1957,7 +1958,7 @@ class CL04Anisotropy(FlucsDiagnostic):
             )
 
             B_locmean_realspace = deltaB_locmean_realspace
-            B_locmean_realspace[0] = cp.ones_like(B_locmean_realspace[0])
+            B_locmean_realspace[2] = cp.ones_like(B_locmean_realspace[2])
 
             nl_term_realspace = cp.einsum('ilmn,ijlmn->jlmn',B_locmean_realspace,grad_deltaB_locfluc_realspace)
 
@@ -1967,7 +1968,7 @@ class CL04Anisotropy(FlucsDiagnostic):
                 axes = (-3,-2,-1),
             )
 
-            nl_term_sqrd = cp.einsum('ijkm,ijkm->jkm',nl_term,nl_term)
+            nl_term_sqrd = cp.einsum('ijkm,ijkm->jkm',cp.conj(nl_term),nl_term)
 
             nl_term_sqrd_limited = cp.where(
                 (cp.sqrt(kx**2 + ky**2) < kperp_single + 1) & (cp.sqrt(kx**2 + ky**2) >= kperp_single),
@@ -1975,7 +1976,7 @@ class CL04Anisotropy(FlucsDiagnostic):
                 cp.zeros_like(nl_term_sqrd)
             )
             
-            deltaB_locfluc_sqrd = cp.einsum('ijkm,ijkm->jkm',deltaB_locfluc,deltaB_locfluc)
+            deltaB_locfluc_sqrd = cp.einsum('ijkm,ijkm->jkm',cp.conj(deltaB_locfluc),deltaB_locfluc)
 
             deltaB_locfluc_sqrd_limited = cp.where(
                 (cp.sqrt(kx**2 + ky**2) < kperp_single + 1) & (cp.sqrt(kx**2 + ky**2) >= kperp_single),
