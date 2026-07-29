@@ -140,8 +140,9 @@ __device__ __forceinline__ FLUCS_FLOAT flucs_i0e(FLUCS_FLOAT x) {
     return chbevl_i0e_B( (FLUCS_FLOAT)32.0/x - (FLUCS_FLOAT)2.0) * flucs_rsqrt(x);
 }
 
+//General KREHM variant
 __device__ __forceinline__
-FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
+FLUCS_FLOAT one_minus_gamma0_over_alpha_operator(FLUCS_FLOAT kperp2) {
 
     const FLUCS_FLOAT alpha = 0.5 * RHOI2 * kperp2;
 
@@ -160,8 +161,9 @@ FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
     return (FLOAT_ONE - flucs_i0e(alpha)) / alpha;
 }
 
+//General KREHM variant
 __device__ __forceinline__
-FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
+FLUCS_FLOAT taubarinv_operator(FLUCS_FLOAT kperp2) {
 
     const FLUCS_FLOAT alpha = 0.5 * RHOI2 * kperp2;
     return (ZTE_OVER_TI) * (FLOAT_ONE - flucs_i0e(alpha));

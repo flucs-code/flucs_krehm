@@ -15,6 +15,30 @@ extern "C" {
 // Array for AB3 nonlinear terms
 __constant__ FLUCS_COMPLEX* multistep_nonlinear_terms = NULL;
 
+
+__device__ __forceinline__
+FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
+
+// ERMHD variant that sets gamma0 to zero
+#ifdef ERMHD
+    const FLUCS_FLOAT alpha = ((FLUCS_FLOAT)0.5) * RHOI2 * kperp2;
+    return alpha < FLUCS_EPSILON ? FLOAT_ONE : FLOAT_ONE / alpha;
+#else
+    return one_minus_gamma0_over_alpha_operator(kperp2);
+#endif
+}
+
+__device__ __forceinline__
+FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
+
+// ERMHD variant that sets gamma0 to zero
+#ifdef ERMHD
+    return ZTE_OVER_TI;
+#else
+    return taubarinv_operator(kperp2);
+#endif
+}
+
 // Fetches the linear matrix for a given mode
 __device__ void get_linear_matrix(
     const size_t index, 
