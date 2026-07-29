@@ -204,12 +204,8 @@ class FreeEnergyDiag(FlucsDiagnostic):
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
 
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
-        fields_prev = self.system.fields[
-            (self.system.current_step - 1) % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
+        fields_prev = self.system.get_fields(1)
 
         # W
         W = self.get_W(fields).get().item()
@@ -527,12 +523,8 @@ class HelicityDiag(FlucsDiagnostic):
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
 
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
-        fields_prev = self.system.fields[
-            (self.system.current_step - 1) % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
+        fields_prev = self.system.get_fields(1)
 
         # H
         H = self.get_H(fields).get().item()
@@ -822,9 +814,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
         current_time = self.system.float(self.system.current_time)
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
 
         # Iterate over spectra to save
         for spectrum in self.get_W:
@@ -1093,9 +1083,7 @@ class HelicityDiag1D(FlucsDiagnostic):
         current_time = self.system.float(self.system.current_time)
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
 
         # Iterate over spectra to save
         for spectrum in self.get_H:
@@ -1572,13 +1560,8 @@ class FluxesDiag(FlucsDiagnostic):
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
 
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
-        fields_prev = self.system.fields[
-            (self.system.current_step - 1)
-            % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
+        fields_prev = self.system.get_fields(1)
 
         # Calculate nonlinear terms for the current fields
         self.system.compute_nonlinear_terms(fields)
