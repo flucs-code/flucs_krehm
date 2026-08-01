@@ -406,27 +406,21 @@ void add_forcing_elsasser(
     (void)dt;
     (void)current_step;
 
+    if (!forcing_range_mask(index))
+        return;
+
     // Indices
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
     const size_t ikx = indices.ikx;
     const size_t iky = indices.iky;
-    const size_t ikz = indices.ikz;
 
-    // Wavenumbers 
+    // Wavenumbers
     const FLUCS_FLOAT kx = kx_from_ikx(ikx);
     const FLUCS_FLOAT ky = ky_from_iky(iky);
-    const FLUCS_FLOAT kz = kz_from_ikz(ikz);
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
-    const FLUCS_FLOAT kz_abs = flucs_fabs(kz);
 
     if (kperp2 == ((FLUCS_FLOAT)0.0))
-        return;
-    
-    if (!(kperp2 > FORCING_KPERP2_MIN &&
-          kperp2 < FORCING_KPERP2_MAX &&
-          kz_abs > FORCING_KZ_MIN &&
-          kz_abs < FORCING_KZ_MAX))
         return;
 
     // Fields
@@ -493,28 +487,22 @@ void add_forcing_meyrand(
     (void)dt;
     (void)current_step;
 
+    if (!forcing_range_mask(index))
+        return;
+
     // Indices
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
     const size_t ikx = indices.ikx;
     const size_t iky = indices.iky;
-    const size_t ikz = indices.ikz;
 
-    // Wavenumbers 
+    // Wavenumbers
     const FLUCS_FLOAT kx = kx_from_ikx(ikx);
     const FLUCS_FLOAT ky = ky_from_iky(iky);
-    const FLUCS_FLOAT kz = kz_from_ikz(ikz);
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
     const FLUCS_FLOAT one_plus_kperp2de2 = FLOAT_ONE + kperp2 * DE2;
-    const FLUCS_FLOAT kz_abs = flucs_fabs(kz);
 
     if (kperp2 == ((FLUCS_FLOAT)0.0))
-        return;
-    
-    if (!(kperp2 > FORCING_KPERP2_MIN &&
-          kperp2 < FORCING_KPERP2_MAX &&
-          kz_abs > FORCING_KZ_MIN &&
-          kz_abs < FORCING_KZ_MAX))
         return;
 
     // Various factors that appear in the terms below
