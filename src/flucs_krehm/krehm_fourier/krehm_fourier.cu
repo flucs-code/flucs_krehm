@@ -12,10 +12,6 @@ extern "C" {
 // Core solver functions
 ////////////////////////////////////////////////////////////////////////////////
 
-// Array for AB3 nonlinear terms
-__constant__ FLUCS_COMPLEX* multistep_nonlinear_terms = NULL;
-
-
 __device__ __forceinline__
 FLUCS_FLOAT one_minus_gamma0_over_alpha(FLUCS_FLOAT kperp2) {
 
@@ -68,8 +64,8 @@ __device__ void get_linear_matrix(
 // Finds the derivatives (in Fourier space) required to construct the nonlinear
 // terms entering through the poisson brackets
 __global__ void find_derivatives(
-    const FLUCS_COMPLEX* fields,
-    FLUCS_COMPLEX* dft_derivatives,
+    const FLUCS_COMPLEX fields_global[NUMBER_OF_FIELDS][HALFUNPADDEDSIZE],
+    FLUCS_COMPLEX dft_derivatives_global[NUMBER_OF_DFT_DERIVATIVES][HALFPADDEDSIZE],
     FLUCS_FLOAT* cfl_rate
 ){
     const size_t padded_index = blockDim.x * blockIdx.x + threadIdx.x;
@@ -84,19 +80,19 @@ __global__ void find_derivatives(
     const size_t padded_ikz = padded_indices.padded_ikz;
 
     if (padded_index == 0)
-        cfl_rate[0] = 0;
+        *cfl_rate = 0;
 
     // Check if mode should be zeroed
     if (   (padded_ikx >= HALF_NX && padded_ikx < (HALF_NX + PADDED_NX) - NX)
         || (padded_ikz >= HALF_NZ && padded_ikz < (HALF_NZ + PADDED_NZ) - NZ)
         || padded_iky >= HALF_NY){
 
-        dft_derivatives[padded_index] = 0;
-        dft_derivatives[padded_index + HALFPADDEDSIZE] = 0;
-        dft_derivatives[padded_index + 2*HALFPADDEDSIZE] = 0;
-        dft_derivatives[padded_index + 3*HALFPADDEDSIZE] = 0;
-        dft_derivatives[padded_index + 4*HALFPADDEDSIZE] = 0;
-        dft_derivatives[padded_index + 5*HALFPADDEDSIZE] = 0;
+        dft_derivatives_global[0][padded_index] = 0;
+        dft_derivatives_global[1][padded_index] = 0;
+        dft_derivatives_global[2][padded_index] = 0;
+        dft_derivatives_global[3][padded_index] = 0;
+        dft_derivatives_global[4][padded_index] = 0;
+        dft_derivatives_global[5][padded_index] = 0;
         return;
     }
     
@@ -110,41 +106,40 @@ __global__ void find_derivatives(
     // padded_iky and iky are the same for nonzero modes
     const FLUCS_FLOAT ky = ky_from_iky(padded_iky);
 
+    const FLUCS_COMPLEX dx = dx_from_ikx(ikx);
+    const FLUCS_COMPLEX dy = dy_from_iky(padded_iky);
+
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
-    const FLUCS_COMPLEX phi = fields[index];
-    const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+    const FLUCS_COMPLEX phi = fields_global[0][index];
+    const FLUCS_COMPLEX apar = fields_global[1][index];
 
     // dxphi
-    dft_derivatives[padded_index]\
-        = FLUCS_COMPLEX(-kx * phi.imag(), kx * phi.real());
+    dft_derivatives_global[0][padded_index] = dx * phi;
 
     // dyphi
-    dft_derivatives[padded_index + HALFPADDEDSIZE]\
-        = FLUCS_COMPLEX(-ky * phi.imag(), ky * phi.real());
+    dft_derivatives_global[1][padded_index] = dy * phi;
 
     // dxapar
-    dft_derivatives[padded_index + 2*HALFPADDEDSIZE]\
-        = FLUCS_COMPLEX(-kx * apar.imag(), kx * apar.real());
+    dft_derivatives_global[2][padded_index] = dx * apar;
 
     // dyapar
-    dft_derivatives[padded_index + 3*HALFPADDEDSIZE]\
-        = FLUCS_COMPLEX(-ky * apar.imag(), ky * apar.real());
+    dft_derivatives_global[3][padded_index] = dy * apar;
 
     // [(1 - Gamma0) / alpha] kperp2phi
-    dft_derivatives[padded_index + 4*HALFPADDEDSIZE]\
-        = one_minus_gamma0_over_alpha(kperp2) * kperp2 * phi;
+    dft_derivatives_global[4][padded_index] = (
+        one_minus_gamma0_over_alpha(kperp2) * kperp2 * phi
+    );
 
     // kperp2apar
-    dft_derivatives[padded_index + 5*HALFPADDEDSIZE]\
-        = kperp2 * apar;
+    dft_derivatives_global[5][padded_index] = kperp2 * apar;
 
 }
 
 // Finds the nonlinear combinations of (real-space) derivatives required to 
 // construct the nonlinear terms
 __global__ void find_nonlinear_bits(
-    FLUCS_FLOAT* real_derivatives_and_bits,
+    FLUCS_FLOAT real_derivatives_and_bits_global[NUMBER_OF_DFT_COMBINED][PADDEDSIZE],
     FLUCS_FLOAT* cfl_rate
 ){
     // Shared memory for CFL calculations
@@ -155,17 +150,17 @@ __global__ void find_nonlinear_bits(
 
     // Inactive threads do not contribute to the cfl reduction 
     const FLUCS_FLOAT dxphi = in_bounds
-        ? real_derivatives_and_bits[real_index]
+        ? real_derivatives_and_bits_global[0][real_index]
         : (FLUCS_FLOAT)0;
     const FLUCS_FLOAT dyphi = in_bounds
-        ? real_derivatives_and_bits[real_index + PADDEDSIZE]
+        ? real_derivatives_and_bits_global[1][real_index]
         : (FLUCS_FLOAT)0;
 
     const FLUCS_FLOAT dxapar = in_bounds
-        ? real_derivatives_and_bits[real_index + 2*PADDEDSIZE]
+        ? real_derivatives_and_bits_global[2][real_index]
         : (FLUCS_FLOAT)0;
     const FLUCS_FLOAT dyapar = in_bounds
-        ? real_derivatives_and_bits[real_index + 3*PADDEDSIZE]
+        ? real_derivatives_and_bits_global[3][real_index]
         : (FLUCS_FLOAT)0;
 
     const FLUCS_FLOAT cfl_phi = flucs_fabs(dxphi) * (NY / LY)
@@ -201,24 +196,30 @@ __global__ void find_nonlinear_bits(
     if (!in_bounds)
         return;
 
-    const FLUCS_FLOAT one_minus_gamma0_over_alpha_kperp2phi = real_derivatives_and_bits[real_index + 4*PADDEDSIZE];
-    const FLUCS_FLOAT kperp2apar = real_derivatives_and_bits[real_index + 5*PADDEDSIZE];
+    const FLUCS_FLOAT one_minus_gamma0_over_alpha_kperp2phi = (
+        real_derivatives_and_bits_global[4][real_index]
+    );
+    const FLUCS_FLOAT kperp2apar = (
+        real_derivatives_and_bits_global[5][real_index]
+    );
 
-    real_derivatives_and_bits[real_index]               = (
+    real_derivatives_and_bits_global[0][real_index] = (
         dxphi * one_minus_gamma0_over_alpha_kperp2phi  - dxapar * kperp2apar
     );
-    real_derivatives_and_bits[real_index + PADDEDSIZE]  = (
+    real_derivatives_and_bits_global[1][real_index] = (
         dyphi * one_minus_gamma0_over_alpha_kperp2phi  - dyapar * kperp2apar
     );
-    real_derivatives_and_bits[real_index + 2*PADDEDSIZE] = (
+    real_derivatives_and_bits_global[2][real_index] = (
         dxphi * (DE2 * kperp2apar)
         - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dxapar * one_minus_gamma0_over_alpha_kperp2phi
     );
-    real_derivatives_and_bits[real_index + 3*PADDEDSIZE] = (
+    real_derivatives_and_bits_global[3][real_index] = (
         dyphi * (DE2 * kperp2apar)
         - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dyapar * one_minus_gamma0_over_alpha_kperp2phi
     );
-    real_derivatives_and_bits[real_index + 4*PADDEDSIZE] = dxphi * dyapar - dyphi * dxapar;
+    real_derivatives_and_bits_global[4][real_index] = (
+        dxphi * dyapar - dyphi * dxapar
+    );
 }
 
 // Returns the nonlinear terms for a given mode
@@ -227,8 +228,8 @@ __device__ void add_nonlinear_terms(
     const FLUCS_FLOAT dt,
     const FLUCS_FLOAT current_time,
     const long long current_step,
-    const FLUCS_COMPLEX* dft_bits,
-    FLUCS_COMPLEX* explicit_terms
+    const FLUCS_COMPLEX dft_bits_global[NUMBER_OF_DFT_BITS][HALFPADDEDSIZE],
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
 ){
     // Indices
     indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -243,27 +244,29 @@ __device__ void add_nonlinear_terms(
     // Wavenumbers and indices 
     const FLUCS_FLOAT kx = kx_from_ikx(ikx);
     const FLUCS_FLOAT ky = ky_from_iky(iky);
+    const FLUCS_COMPLEX dx = dx_from_ikx(ikx);
+    const FLUCS_COMPLEX dy = dy_from_iky(iky);
 
     const size_t padded_ikx = padded_ikx_from_ikx(ikx);
     const size_t padded_ikz = padded_ikz_from_ikz(ikz);
     const size_t padded_index = index_from_3d<PADDED_NZ, PADDED_NX, HALF_PADDED_NY>(padded_ikz, padded_ikx, iky);
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+    const FLUCS_COMPLEX dxphi_gamma_phi = dft_bits_global[0][padded_index];
+    const FLUCS_COMPLEX dyphi_gamma_phi = dft_bits_global[1][padded_index];
+    const FLUCS_COMPLEX dxphi_de2_apar = dft_bits_global[2][padded_index];
+    const FLUCS_COMPLEX dyphi_de2_apar = dft_bits_global[3][padded_index];
+    const FLUCS_COMPLEX poisson_phi_apar = dft_bits_global[4][padded_index];
     
     // Calculate nonnlinear terms
     explicit_terms[0] += DFT_PADDEDSIZE_FACTOR * (
-        + FLUCS_COMPLEX(-ky * dft_bits[padded_index].imag(),
-                         ky * dft_bits[padded_index].real())
-        - FLUCS_COMPLEX(-kx * dft_bits[padded_index + HALFPADDEDSIZE].imag(),
-                         kx * dft_bits[padded_index + HALFPADDEDSIZE].real())
+        dy * dxphi_gamma_phi - dx * dyphi_gamma_phi
     ) / (one_minus_gamma0_over_alpha(kperp2) * kperp2);
 
     explicit_terms[1] += DFT_PADDEDSIZE_FACTOR * (
-        + dft_bits[padded_index + 4*HALFPADDEDSIZE]
-        + FLUCS_COMPLEX(-ky * dft_bits[padded_index + 2*HALFPADDEDSIZE].imag(),
-                         ky * dft_bits[padded_index + 2*HALFPADDEDSIZE].real())
-        - FLUCS_COMPLEX(-kx * dft_bits[padded_index + 3*HALFPADDEDSIZE].imag(),
-                         kx * dft_bits[padded_index + 3*HALFPADDEDSIZE].real())
+        poisson_phi_apar
+        + dy * dxphi_de2_apar - dx * dyphi_de2_apar
     ) / (FLOAT_ONE + kperp2*DE2);
 
 }
@@ -327,14 +330,14 @@ void get_thetas_from_components(
 __device__ __forceinline__
 void get_thetas_from_fields(
     const size_t index,
-    const FLUCS_COMPLEX* fields,
+    const FLUCS_COMPLEX* fields_global,
     FLUCS_COMPLEX& thetap,
     FLUCS_COMPLEX& thetam,
     FLUCS_FLOAT& vphase
 ){
     // Fields
-    const FLUCS_COMPLEX phi = fields[index];
-    const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+    const FLUCS_COMPLEX phi = fields_global[index];
+    const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
     get_thetas_from_components(index, phi, apar, thetap, thetam, vphase);
 }
@@ -342,8 +345,8 @@ void get_thetas_from_fields(
 __device__ __forceinline__
 FLUCS_FLOAT get_thetas_free_energy_rate(
     const size_t index,
-    const FLUCS_COMPLEX* fields,
-    const FLUCS_COMPLEX rates[2],
+    const FLUCS_COMPLEX* fields_global,
+    const FLUCS_COMPLEX rates[NUMBER_OF_FIELDS],
     const int theta_sign
 ){
     // Indices
@@ -360,7 +363,7 @@ FLUCS_FLOAT get_thetas_free_energy_rate(
     // Thetas
     FLUCS_COMPLEX thetap, thetam;
     FLUCS_FLOAT vphase;
-    get_thetas_from_fields(index, fields, thetap, thetam, vphase);
+    get_thetas_from_fields(index, fields_global, thetap, thetam, vphase);
 
     // Rates
     const FLUCS_COMPLEX phi_rate = rates[0];
@@ -388,40 +391,6 @@ FLUCS_FLOAT get_thetas_free_energy_rate(
 
 #ifdef FORCING
 
-// The ky=0 modes are stored together with their conjugate partners. Construct
-// forcing from their physical, conjugate-symmetric component so negative
-// damping does not amplify roundoff.
-__device__ __forceinline__
-void get_forcing_fields(
-    const size_t index,
-    const FLUCS_COMPLEX* fields,
-    FLUCS_COMPLEX& phi,
-    FLUCS_COMPLEX& apar
-){
-    const indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
-
-    phi = fields[index];
-    apar = fields[index + HALFUNPADDEDSIZE];
-
-    if (indices.iky != 0)
-        return;
-
-    const size_t conjugate_ikz = indices.ikz == 0 ? 0 : NZ - indices.ikz;
-    const size_t conjugate_ikx = indices.ikx == 0 ? 0 : NX - indices.ikx;
-    const size_t conjugate_index = index_from_3d<NZ, NX, HALF_NY>(
-        conjugate_ikz, conjugate_ikx, 0
-    );
-
-    phi = ((FLUCS_FLOAT)0.5) * (
-        phi
-        + conj(fields[conjugate_index])
-    );
-    apar = ((FLUCS_FLOAT)0.5) * (
-        apar
-        + conj(fields[conjugate_index + HALFUNPADDEDSIZE])
-    );
-}
-
 #if defined(FORCING_METHOD_ELSASSER)
 __device__ __forceinline__
 void add_forcing_elsasser(
@@ -429,8 +398,8 @@ void add_forcing_elsasser(
     const FLUCS_FLOAT dt,
     const FLUCS_FLOAT current_time,
     const long long current_step,
-    const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[2]
+    const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
 )
 {
     // Unused variables
@@ -461,8 +430,8 @@ void add_forcing_elsasser(
         return;
 
     // Fields
-    FLUCS_COMPLEX phi, apar;
-    get_forcing_fields(index, previous_fields, phi, apar);
+    const FLUCS_COMPLEX phi = previous_fields_forcing[0];
+    const FLUCS_COMPLEX apar = previous_fields_forcing[1];
 
     // Matrices
     FLUCS_COMPLEX thetap, thetam;
@@ -516,8 +485,8 @@ void add_forcing_meyrand(
     const FLUCS_FLOAT dt,
     const FLUCS_FLOAT current_time,
     const long long current_step,
-    const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[2]
+    const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
 )
 {
     // Unused variables
@@ -555,8 +524,8 @@ void add_forcing_meyrand(
     const FLUCS_FLOAT helicity_prefactor = 2 * gamma_factor * kperp2 * one_plus_kperp2de2;
 
     // Fields
-    FLUCS_COMPLEX phi, apar;
-    get_forcing_fields(index, previous_fields, phi, apar);
+    const FLUCS_COMPLEX phi = previous_fields_forcing[0];
+    const FLUCS_COMPLEX apar = previous_fields_forcing[1];
 
     // Useful combinations of fields
     const FLUCS_FLOAT phi2 = (
@@ -605,18 +574,20 @@ __device__ void add_forcing_explicit(
     const FLUCS_FLOAT dt,
     const FLUCS_FLOAT current_time, 
     const long long current_step,
-    const FLUCS_COMPLEX* previous_fields,
-    FLUCS_COMPLEX explicit_terms[2] 
+    const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
 ){
     #if defined(FORCING_METHOD_ELSASSER)
         add_forcing_elsasser(
-            index, dt, current_time, current_step, previous_fields, explicit_terms
+            index, dt, current_time, current_step,
+            previous_fields_forcing, explicit_terms
         );
     #endif
 
     #if defined(FORCING_METHOD_MEYRAND)
         add_forcing_meyrand(
-            index, dt, current_time, current_step, previous_fields, explicit_terms
+            index, dt, current_time, current_step,
+            previous_fields_forcing, explicit_terms
         );
     #endif
 }
@@ -629,12 +600,12 @@ __device__ void add_forcing_explicit(
 ////////////////////////////////////////////////////////////////////////////////
 
 struct FreeEnergy_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[index];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -659,11 +630,11 @@ struct FreeEnergy_Functor {
 };
 
 struct FreeEnergyUperp_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Field
-        const FLUCS_COMPLEX phi = fields[index];
+        const FLUCS_COMPLEX phi = fields_global[index];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -680,11 +651,11 @@ struct FreeEnergyUperp_Functor {
 };
 
 struct FreeEnergyDens_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Field
-        const FLUCS_COMPLEX phi = fields[index];
+        const FLUCS_COMPLEX phi = fields_global[index];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -699,11 +670,11 @@ struct FreeEnergyDens_Functor {
 };
 
 struct FreeEnergyBperp_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Field
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -718,11 +689,11 @@ struct FreeEnergyBperp_Functor {
 };
 
 struct FreeEnergyUpar_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Field
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -739,21 +710,28 @@ struct FreeEnergyUpar_Functor {
 };
 
 struct FreeEnergyForcing_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFUNPADDEDSIZE];
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[0][index];
+        const FLUCS_COMPLEX apar = fields_global[1][index];
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[2] = {0};
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef FORCING_EXPLICIT
+        FLUCS_COMPLEX fields_forcing[NUMBER_OF_FIELDS];
+        get_forcing_fields(index, fields_global, fields_forcing);
         add_forcing_explicit(
-            index, dt, current_time, current_step, fields, forcing_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            fields_forcing,
+            forcing_terms
         );
 #endif
 
@@ -780,23 +758,28 @@ struct FreeEnergyForcing_Functor {
 };
 
 struct FreeEnergyNonlinear_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
-    const FLUCS_COMPLEX* dft_bits;
+    const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFPADDEDSIZE];
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[index];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[2] = {0};
+        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(
-            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            dft_bits_global,
+            nonlinear_terms
         );
 #endif
 
@@ -829,27 +812,27 @@ struct FreeEnergyNonlinear_Functor {
 };
 
 struct FreeEnergyHyperdissipation_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * Hyperdissipation_Functor<FreeEnergy_Functor>{
-                FreeEnergy_Functor{fields},
+                FreeEnergy_Functor{fields_global},
                 adaptive_rate
             }(index);
     }
 };
 
 struct FreeEnergyHyperdissipationComponent_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * HyperdissipationSelector_Functor<FreeEnergy_Functor>{
-                FreeEnergy_Functor{fields},
+                FreeEnergy_Functor{fields_global},
                 adaptive_rate,
                 hyperdissipation_type
             }(index);
@@ -857,7 +840,7 @@ struct FreeEnergyHyperdissipationComponent_Functor {
 };
 
 struct FreeEnergyThetap_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         
         // Indices
@@ -869,7 +852,7 @@ struct FreeEnergyThetap_Functor {
         // Thetas
         FLUCS_COMPLEX thetap, thetam;
         FLUCS_FLOAT vphase;
-        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
+        get_thetas_from_fields(index, fields_global, thetap, thetam, vphase);
 
         return ((FLUCS_FLOAT)0.5) * kperp2
             * (thetap.real()*thetap.real() + thetap.imag()*thetap.imag());
@@ -877,7 +860,7 @@ struct FreeEnergyThetap_Functor {
 };
 
 struct FreeEnergyThetapForcing_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFUNPADDEDSIZE];
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
@@ -885,74 +868,86 @@ struct FreeEnergyThetapForcing_Functor {
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[2] = {0};
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef FORCING_EXPLICIT
+        FLUCS_COMPLEX fields_forcing[NUMBER_OF_FIELDS];
+        get_forcing_fields(index, fields_global, fields_forcing);
         add_forcing_explicit(
-            index, dt, current_time, current_step, fields, forcing_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            fields_forcing,
+            forcing_terms
         );
 #endif
 
         // Physical rates due to forcing
-        FLUCS_COMPLEX rates[2] = {0};
+        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS] = {0};
         rates[0] = -forcing_terms[0];
         rates[1] = -forcing_terms[1];
 
         return get_thetas_free_energy_rate(
-            index, fields, rates, +1
+            index, fields_global[0], rates, +1
         );
     }
 };
 
 struct FreeEnergyThetapNonlinear_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
-    const FLUCS_COMPLEX* dft_bits;
+    const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFPADDEDSIZE];
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[2] = {0};
+        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(
-            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            dft_bits_global,
+            nonlinear_terms
         );
 #endif
 
         // Physical rates due to nonlinear terms
-        FLUCS_COMPLEX rates[2] = {0};
+        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS] = {0};
         rates[0] = -nonlinear_terms[0];
         rates[1] = -nonlinear_terms[1];
 
         return get_thetas_free_energy_rate(
-            index, fields, rates, +1
+            index, fields_global, rates, +1
         );
     }
 };
 
 struct FreeEnergyThetapHyperdissipation_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * Hyperdissipation_Functor<FreeEnergyThetap_Functor>{
-                FreeEnergyThetap_Functor{fields},
+                FreeEnergyThetap_Functor{fields_global},
                 adaptive_rate
             }(index);
     }
 };
 
 struct FreeEnergyThetapHyperdissipationComponent_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * HyperdissipationSelector_Functor<FreeEnergyThetap_Functor>{
-                FreeEnergyThetap_Functor{fields},
+                FreeEnergyThetap_Functor{fields_global},
                 adaptive_rate,
                 hyperdissipation_type
             }(index);
@@ -960,7 +955,7 @@ struct FreeEnergyThetapHyperdissipationComponent_Functor {
 };
 
 struct FreeEnergyThetam_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         
         // Indices
@@ -972,7 +967,7 @@ struct FreeEnergyThetam_Functor {
         // Thetas
         FLUCS_COMPLEX thetap, thetam;
         FLUCS_FLOAT vphase;
-        get_thetas_from_fields(index, fields, thetap, thetam, vphase);
+        get_thetas_from_fields(index, fields_global, thetap, thetam, vphase);
 
         return ((FLUCS_FLOAT)0.5) * kperp2
             * (thetam.real()*thetam.real() + thetam.imag()*thetam.imag());
@@ -980,7 +975,7 @@ struct FreeEnergyThetam_Functor {
 };
 
 struct FreeEnergyThetamForcing_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFUNPADDEDSIZE];
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
@@ -988,74 +983,86 @@ struct FreeEnergyThetamForcing_Functor {
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[2] = {0};
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef FORCING_EXPLICIT
+        FLUCS_COMPLEX fields_forcing[NUMBER_OF_FIELDS];
+        get_forcing_fields(index, fields_global, fields_forcing);
         add_forcing_explicit(
-            index, dt, current_time, current_step, fields, forcing_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            fields_forcing,
+            forcing_terms
         );
 #endif
 
         // Physical rates due to forcing
-        FLUCS_COMPLEX rates[2] = {0};
+        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS] = {0};
         rates[0] = -forcing_terms[0];
         rates[1] = -forcing_terms[1];
 
         return get_thetas_free_energy_rate(
-            index, fields, rates, -1
+            index, fields_global[0], rates, -1
         );
     }
 };
 
 struct FreeEnergyThetamNonlinear_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
-    const FLUCS_COMPLEX* dft_bits;
+    const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFPADDEDSIZE];
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[2] = {0};
+        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(
-            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            dft_bits_global,
+            nonlinear_terms
         );
 #endif
 
         // Physical rates due to nonlinear terms
-        FLUCS_COMPLEX rates[2] = {0};
+        FLUCS_COMPLEX rates[NUMBER_OF_FIELDS] = {0};
         rates[0] = -nonlinear_terms[0];
         rates[1] = -nonlinear_terms[1];
 
         return get_thetas_free_energy_rate(
-            index, fields, rates, -1
+            index, fields_global, rates, -1
         );
     }
 };
 
 struct FreeEnergyThetamHyperdissipation_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * Hyperdissipation_Functor<FreeEnergyThetam_Functor>{
-                FreeEnergyThetam_Functor{fields},
+                FreeEnergyThetam_Functor{fields_global},
                 adaptive_rate
             }(index);
     }
 };
 
 struct FreeEnergyThetamHyperdissipationComponent_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * HyperdissipationSelector_Functor<FreeEnergyThetam_Functor>{
-                FreeEnergyThetam_Functor{fields},
+                FreeEnergyThetam_Functor{fields_global},
                 adaptive_rate,
                 hyperdissipation_type
             }(index);
@@ -1067,12 +1074,12 @@ struct FreeEnergyThetamHyperdissipationComponent_Functor {
 ////////////////////////////////////////////////////////////////////////////////
 
 struct Helicity_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[index];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -1098,12 +1105,12 @@ struct Helicity_Functor {
 };
 
 struct HelicityApar_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[index];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -1129,12 +1136,12 @@ struct HelicityApar_Functor {
 };
 
 struct HelicityUpar_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[index];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Indices and wavenumbers
         indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
@@ -1160,7 +1167,7 @@ struct HelicityUpar_Functor {
 };
 
 struct HelicityForcing_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFUNPADDEDSIZE];
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
@@ -1168,14 +1175,21 @@ struct HelicityForcing_Functor {
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[0][index];
+        const FLUCS_COMPLEX apar = fields_global[1][index];
 
         // Forcing terms
-        FLUCS_COMPLEX forcing_terms[2] = {0};
+        FLUCS_COMPLEX forcing_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef FORCING_EXPLICIT
+        FLUCS_COMPLEX fields_forcing[NUMBER_OF_FIELDS];
+        get_forcing_fields(index, fields_global, fields_forcing);
         add_forcing_explicit(
-            index, dt, current_time, current_step, fields, forcing_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            fields_forcing,
+            forcing_terms
         );
 #endif
 
@@ -1204,23 +1218,28 @@ struct HelicityForcing_Functor {
 };
 
 struct HelicityNonlinear_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
-    const FLUCS_COMPLEX* dft_bits;
+    const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFPADDEDSIZE];
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Fields
-        const FLUCS_COMPLEX phi = fields[index];
-        const FLUCS_COMPLEX apar = fields[index + HALFUNPADDEDSIZE];
+        const FLUCS_COMPLEX phi = fields_global[index];
+        const FLUCS_COMPLEX apar = fields_global[index + HALFUNPADDEDSIZE];
 
         // Nonlinear terms
-        FLUCS_COMPLEX nonlinear_terms[2] = {0};
+        FLUCS_COMPLEX nonlinear_terms[NUMBER_OF_FIELDS] = {0};
 #ifdef NONLINEAR
         add_nonlinear_terms(
-            index, dt, current_time, current_step, dft_bits, nonlinear_terms
+            index,
+            dt,
+            current_time,
+            current_step,
+            dft_bits_global,
+            nonlinear_terms
         );
 #endif
 
@@ -1248,27 +1267,27 @@ struct HelicityNonlinear_Functor {
 };
 
 struct HelicityHyperdissipation_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * Hyperdissipation_Functor<Helicity_Functor>{
-                Helicity_Functor{fields},
+                Helicity_Functor{fields_global},
                 adaptive_rate
             }(index);
     }
 };
 
 struct HelicityHyperdissipationComponent_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * HyperdissipationSelector_Functor<Helicity_Functor>{
-                Helicity_Functor{fields},
+                Helicity_Functor{fields_global},
                 adaptive_rate,
                 hyperdissipation_type
             }(index);
@@ -1276,7 +1295,7 @@ struct HelicityHyperdissipationComponent_Functor {
 };
 
 struct HelicityThetap_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Indices
@@ -1291,12 +1310,12 @@ struct HelicityThetap_Functor {
         const FLUCS_FLOAT vphase =
             get_phase_velocity(kperp2, gamma_factor);
 
-        return FreeEnergyThetap_Functor{fields}(index) / vphase;
+        return FreeEnergyThetap_Functor{fields_global}(index) / vphase;
     }
 };
 
 struct HelicityThetapForcing_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFUNPADDEDSIZE];
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
@@ -1316,17 +1335,17 @@ struct HelicityThetapForcing_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetapForcing_Functor{
-            fields, dt, current_time, current_step
+            fields_global, dt, current_time, current_step
         }(index) / vphase;
     }
 };
 
 struct HelicityThetapNonlinear_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
-    const FLUCS_COMPLEX* dft_bits;
+    const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFPADDEDSIZE];
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
@@ -1343,33 +1362,33 @@ struct HelicityThetapNonlinear_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetapNonlinear_Functor{
-            fields, dt, current_time, current_step, dft_bits
+            fields_global, dt, current_time, current_step, dft_bits_global
         }(index) / vphase;
     }
 };
 
 struct HelicityThetapHyperdissipation_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * Hyperdissipation_Functor<HelicityThetap_Functor>{
-                HelicityThetap_Functor{fields},
+                HelicityThetap_Functor{fields_global},
                 adaptive_rate
             }(index);
     }
 };
 
 struct HelicityThetapHyperdissipationComponent_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * HyperdissipationSelector_Functor<HelicityThetap_Functor>{
-                HelicityThetap_Functor{fields},
+                HelicityThetap_Functor{fields_global},
                 adaptive_rate,
                 hyperdissipation_type
             }(index);
@@ -1377,7 +1396,7 @@ struct HelicityThetapHyperdissipationComponent_Functor {
 };
 
 struct HelicityThetam_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
         // Indices
@@ -1392,12 +1411,12 @@ struct HelicityThetam_Functor {
         const FLUCS_FLOAT vphase =
             get_phase_velocity(kperp2, gamma_factor);
 
-        return FreeEnergyThetam_Functor{fields}(index) / vphase;
+        return FreeEnergyThetam_Functor{fields_global}(index) / vphase;
     }
 };
 
 struct HelicityThetamForcing_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFUNPADDEDSIZE];
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
@@ -1417,17 +1436,17 @@ struct HelicityThetamForcing_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetamForcing_Functor{
-            fields, dt, current_time, current_step
+            fields_global, dt, current_time, current_step
         }(index) / vphase;
     }
 };
 
 struct HelicityThetamNonlinear_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
     const FLUCS_FLOAT current_time;
     const long long current_step;
-    const FLUCS_COMPLEX* dft_bits;
+    const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFPADDEDSIZE];
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
@@ -1444,33 +1463,33 @@ struct HelicityThetamNonlinear_Functor {
             get_phase_velocity(kperp2, gamma_factor);
 
         return FreeEnergyThetamNonlinear_Functor{
-            fields, dt, current_time, current_step, dft_bits
+            fields_global, dt, current_time, current_step, dft_bits_global
         }(index) / vphase;
     }
 };
 
 struct HelicityThetamHyperdissipation_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * Hyperdissipation_Functor<HelicityThetam_Functor>{
-                HelicityThetam_Functor{fields},
+                HelicityThetam_Functor{fields_global},
                 adaptive_rate
             }(index);
     }
 };
 
 struct HelicityThetamHyperdissipationComponent_Functor {
-    const FLUCS_COMPLEX* fields;
+    const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT adaptive_rate;
     const int hyperdissipation_type;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
         return (FLUCS_FLOAT)2.0
             * HyperdissipationSelector_Functor<HelicityThetam_Functor>{
-                HelicityThetam_Functor{fields},
+                HelicityThetam_Functor{fields_global},
                 adaptive_rate,
                 hyperdissipation_type
             }(index);
