@@ -65,8 +65,7 @@ __device__ void get_linear_matrix(
 // terms entering through the poisson brackets
 __global__ void find_derivatives(
     const FLUCS_COMPLEX fields_global[NUMBER_OF_FIELDS][HALFUNPADDEDSIZE],
-    FLUCS_COMPLEX dft_derivatives_global[NUMBER_OF_DFT_DERIVATIVES][HALFPADDEDSIZE],
-    FLUCS_FLOAT* cfl_rate
+    FLUCS_COMPLEX dft_derivatives_global[NUMBER_OF_DFT_DERIVATIVES][HALFPADDEDSIZE]
 ){
     const size_t padded_index = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -78,9 +77,6 @@ __global__ void find_derivatives(
     const size_t padded_ikx = padded_indices.padded_ikx;
     const size_t padded_iky = padded_indices.padded_iky;
     const size_t padded_ikz = padded_indices.padded_ikz;
-
-    if (padded_index == 0)
-        *cfl_rate = 0;
 
     // Check if mode should be zeroed
     if (   (padded_ikx >= HALF_NX && padded_ikx < (HALF_NX + PADDED_NX) - NX)
@@ -140,11 +136,8 @@ __global__ void find_derivatives(
 // construct the nonlinear terms
 __global__ void find_nonlinear_bits(
     FLUCS_FLOAT real_derivatives_and_bits_global[NUMBER_OF_DFT_COMBINED][PADDEDSIZE],
-    FLUCS_FLOAT* cfl_rate
+    FLUCS_FLOAT* cfl_rate_global
 ){
-    // Shared memory for CFL calculations
-    extern __shared__ FLUCS_FLOAT cfl_shared[];
-
     const size_t real_index = blockDim.x * blockIdx.x + threadIdx.x;
     const bool in_bounds = real_index < PADDEDSIZE;
 
@@ -174,27 +167,7 @@ __global__ void find_nonlinear_bits(
     // when running with finite de
     const FLUCS_FLOAT cfl = cfl_phi + cfl_apar;
 
-    // Find max CFL using shared memory
-    // TODO: Could we speed this up by reducing over warps?
-    cfl_shared[threadIdx.x] = cfl;
-    __syncthreads();
-
-    // Parallel reduction in shared memory
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.x < stride) {
-            cfl_shared[threadIdx.x] = flucs_fmax(cfl_shared[threadIdx.x], cfl_shared[threadIdx.x + stride]);
-        }
-        __syncthreads();
-    }
-
-    // First thread in block writes to global max via atomic
-    if (threadIdx.x == 0) {
-        atomicMaxFloat(cfl_rate, cfl_shared[0]); // custom atomic for float
-    }
-
-    // Out-of-bounds threads should not contribute to nonlinear bits
-    if (!in_bounds)
-        return;
+    update_cfl(cfl, cfl_rate_global);
 
     const FLUCS_FLOAT one_minus_gamma0_over_alpha_kperp2phi = (
         real_derivatives_and_bits_global[4][real_index]
