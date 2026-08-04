@@ -13,6 +13,7 @@ from flucs.utilities.messages import flucsprint
 if TYPE_CHECKING:
     from flucs_krehm.krehm_fourier.krehm_fourier import KREHMFourier
 
+
 class FreeEnergyDiag(FlucsDiagnostic):
     """
     Computes quantities related to the free energy, including contributions to
@@ -74,7 +75,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
         self.get_dWdt_forcing = reductions.get_reduction(
             reduction_output="scalar",
             functor="FreeEnergyForcing_Functor",
-            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+            input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
             complex_output=False,
         )
         self.get_dWdt_hyperdissipation_component = reductions.get_reduction(
@@ -166,7 +167,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
             self.get_dWpdt_forcing = reductions.get_reduction(
                 reduction_output="scalar",
                 functor="FreeEnergyThetapForcing_Functor",
-                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dWpdt_hyperdissipation_component = reductions.get_reduction(
@@ -184,7 +185,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
             self.get_dWmdt_forcing = reductions.get_reduction(
                 reduction_output="scalar",
                 functor="FreeEnergyThetamForcing_Functor",
-                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dWmdt_hyperdissipation_component = reductions.get_reduction(
@@ -200,15 +201,12 @@ class FreeEnergyDiag(FlucsDiagnostic):
     def execute(self) -> None:
         # Useful aliases
         current_dt = self.system.float(self.system.current_dt)
+        current_time = self.system.float(self.system.current_time)
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
 
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
-        fields_prev = self.system.fields[
-            (self.system.current_step - 1) % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
+        fields_prev = self.system.get_fields(1)
 
         # W
         W = self.get_W(fields).get().item()
@@ -216,7 +214,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
 
         # dWdt_forcing
         dWdt_forcing = self.get_dWdt_forcing(
-            fields, current_dt, current_step
+            fields, current_dt, current_time, current_step
         ).get().item()
         self.save_data("dWdt_forcing", dWdt_forcing)
 
@@ -268,7 +266,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
 
             # dWpdt_forcing
             dWpdt_forcing = self.get_dWpdt_forcing(
-                fields, current_dt, current_step
+                fields, current_dt, current_time, current_step
             ).get().item()
             self.save_data("dWpdt_forcing", dWpdt_forcing)
 
@@ -293,7 +291,7 @@ class FreeEnergyDiag(FlucsDiagnostic):
 
             # dWmdt_forcing
             dWmdt_forcing = self.get_dWmdt_forcing(
-                fields, current_dt, current_step
+                fields, current_dt, current_time, current_step
             ).get().item()
             self.save_data("dWmdt_forcing", dWmdt_forcing)
 
@@ -389,7 +387,7 @@ class HelicityDiag(FlucsDiagnostic):
         self.get_dHdt_forcing = reductions.get_reduction(
             reduction_output="scalar",
             functor="HelicityForcing_Functor",
-            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+            input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
             complex_output=False,
         )
         self.get_dHdt_hyperdissipation_component = reductions.get_reduction(
@@ -488,7 +486,7 @@ class HelicityDiag(FlucsDiagnostic):
             self.get_dHpdt_forcing = reductions.get_reduction(
                 reduction_output="scalar",
                 functor="HelicityThetapForcing_Functor",
-                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dHpdt_hyperdissipation_component = reductions.get_reduction(
@@ -506,7 +504,7 @@ class HelicityDiag(FlucsDiagnostic):
             self.get_dHmdt_forcing = reductions.get_reduction(
                 reduction_output="scalar",
                 functor="HelicityThetamForcing_Functor",
-                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dHmdt_hyperdissipation_component = reductions.get_reduction(
@@ -522,15 +520,12 @@ class HelicityDiag(FlucsDiagnostic):
     def execute(self) -> None:
         # Useful aliases
         current_dt = self.system.float(self.system.current_dt)
+        current_time = self.system.float(self.system.current_time)
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
 
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
-        fields_prev = self.system.fields[
-            (self.system.current_step - 1) % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
+        fields_prev = self.system.get_fields(1)
 
         # H
         H = self.get_H(fields).get().item()
@@ -538,7 +533,7 @@ class HelicityDiag(FlucsDiagnostic):
 
         # dHdt_forcing
         dHdt_forcing = self.get_dHdt_forcing(
-            fields, current_dt, current_step
+            fields, current_dt, current_time, current_step
         ).get().item()
         self.save_data("dHdt_forcing", dHdt_forcing)
 
@@ -584,7 +579,7 @@ class HelicityDiag(FlucsDiagnostic):
 
             # dHpdt_forcing
             dHpdt_forcing = self.get_dHpdt_forcing(
-                fields, current_dt, current_step
+                fields, current_dt, current_time, current_step
             ).get().item()
             self.save_data("dHpdt_forcing", dHpdt_forcing)
 
@@ -609,7 +604,7 @@ class HelicityDiag(FlucsDiagnostic):
 
             # dHmdt_forcing
             dHmdt_forcing = self.get_dHmdt_forcing(
-                fields, current_dt, current_step
+                fields, current_dt, current_time, current_step
             ).get().item()
             self.save_data("dHmdt_forcing", dHmdt_forcing)
 
@@ -713,7 +708,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
             self.get_dWdt_forcing[spectrum] = reductions.get_reduction(
                 reduction_output=spectrum,
                 functor="FreeEnergyForcing_Functor",
-                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dWdt_hyperdissipation[spectrum] = reductions.get_reduction(
@@ -784,7 +779,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                 self.get_dWpdt_forcing[spectrum] = reductions.get_reduction(
                     reduction_output=spectrum,
                     functor="FreeEnergyThetapForcing_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                     complex_output=False,
                 )
                 self.get_dWpdt_hyperdissipation[spectrum] = reductions.get_reduction(
@@ -802,7 +797,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                 self.get_dWmdt_forcing[spectrum] = reductions.get_reduction(
                     reduction_output=spectrum,
                     functor="FreeEnergyThetamForcing_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                     complex_output=False,
                 )
                 self.get_dWmdt_hyperdissipation[spectrum] = reductions.get_reduction(
@@ -817,11 +812,10 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
 
     def execute(self) -> None:
         current_dt = self.system.float(self.system.current_dt)
+        current_time = self.system.float(self.system.current_time)
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
 
         # Iterate over spectra to save
         for spectrum in self.get_W:
@@ -835,7 +829,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
             self.save_data(
                 f"{spectrum}_spectra/dWdt_forcing",
                 self.get_dWdt_forcing[spectrum](
-                    fields, current_dt, current_step
+                    fields, current_dt, current_time, current_step
                 ).get(),
             )
 
@@ -878,7 +872,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                 self.save_data(
                     f"{spectrum}_spectra/dWpdt_forcing",
                     self.get_dWpdt_forcing[spectrum](
-                        fields, current_dt, current_step
+                        fields, current_dt, current_time, current_step
                     ).get(),
                 )
 
@@ -901,7 +895,7 @@ class FreeEnergyDiag1D(FlucsDiagnostic):
                 self.save_data(
                     f"{spectrum}_spectra/dWmdt_forcing",
                     self.get_dWmdt_forcing[spectrum](
-                        fields, current_dt, current_step
+                        fields, current_dt, current_time, current_step
                     ).get(),
                 )
 
@@ -995,7 +989,7 @@ class HelicityDiag1D(FlucsDiagnostic):
             self.get_dHdt_forcing[spectrum] = reductions.get_reduction(
                 reduction_output=spectrum,
                 functor="HelicityForcing_Functor",
-                input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                 complex_output=False,
             )
             self.get_dHdt_hyperdissipation[spectrum] = reductions.get_reduction(
@@ -1054,7 +1048,7 @@ class HelicityDiag1D(FlucsDiagnostic):
                 self.get_dHpdt_forcing[spectrum] = reductions.get_reduction(
                     reduction_output=spectrum,
                     functor="HelicityThetapForcing_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                     complex_output=False,
                 )
                 self.get_dHpdt_hyperdissipation[spectrum] = reductions.get_reduction(
@@ -1072,7 +1066,7 @@ class HelicityDiag1D(FlucsDiagnostic):
                 self.get_dHmdt_forcing[spectrum] = reductions.get_reduction(
                     reduction_output=spectrum,
                     functor="HelicityThetamForcing_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                     complex_output=False,
                 )
                 self.get_dHmdt_hyperdissipation[spectrum] = reductions.get_reduction(
@@ -1087,11 +1081,10 @@ class HelicityDiag1D(FlucsDiagnostic):
 
     def execute(self) -> None:
         current_dt = self.system.float(self.system.current_dt)
+        current_time = self.system.float(self.system.current_time)
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
 
         # Iterate over spectra to save
         for spectrum in self.get_H:
@@ -1105,7 +1098,7 @@ class HelicityDiag1D(FlucsDiagnostic):
             self.save_data(
                 f"{spectrum}_spectra/dHdt_forcing",
                 self.get_dHdt_forcing[spectrum](
-                    fields, current_dt, current_step
+                    fields, current_dt, current_time, current_step
                 ).get(),
             )
 
@@ -1138,7 +1131,7 @@ class HelicityDiag1D(FlucsDiagnostic):
                 self.save_data(
                     f"{spectrum}_spectra/dHpdt_forcing",
                     self.get_dHpdt_forcing[spectrum](
-                        fields, current_dt, current_step
+                        fields, current_dt, current_time, current_step
                     ).get(),
                 )
 
@@ -1160,7 +1153,7 @@ class HelicityDiag1D(FlucsDiagnostic):
                 self.save_data(
                     f"{spectrum}_spectra/dHmdt_forcing",
                     self.get_dHmdt_forcing[spectrum](
-                        fields, current_dt, current_step
+                        fields, current_dt, current_time, current_step
                     ).get(),
                 )
 
@@ -1305,13 +1298,13 @@ class FluxesDiag(FlucsDiagnostic):
                 self.get_dWdt_nonlinear[flux] = reductions.get_reduction(
                     reduction_output=reduction_output,
                     functor="FreeEnergyNonlinear_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,FLUCS_FLOAT,long long,const FLUCS_COMPLEX (*)[HALFPADDEDSIZE]",
                     complex_output=False,
                 )
                 self.get_dWdt_forcing[flux] = reductions.get_reduction(
                     reduction_output=reduction_output,
                     functor="FreeEnergyForcing_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                     complex_output=False,
                 )
                 self.get_dWdt_hyperdissipation[flux] = (
@@ -1355,7 +1348,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="FreeEnergyThetapNonlinear_Functor",
-                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,FLUCS_FLOAT,long long,const FLUCS_COMPLEX (*)[HALFPADDEDSIZE]",
                             complex_output=False,
                         )
                     )
@@ -1363,9 +1356,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="FreeEnergyThetapForcing_Functor",
-                            input_args=(
-                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
-                            ),
+                            input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                             complex_output=False,
                         )
                     )
@@ -1391,7 +1382,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="FreeEnergyThetamNonlinear_Functor",
-                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,FLUCS_FLOAT,long long,const FLUCS_COMPLEX (*)[HALFPADDEDSIZE]",
                             complex_output=False,
                         )
                     )
@@ -1399,9 +1390,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="FreeEnergyThetamForcing_Functor",
-                            input_args=(
-                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
-                            ),
+                            input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                             complex_output=False,
                         )
                     )
@@ -1442,13 +1431,13 @@ class FluxesDiag(FlucsDiagnostic):
                 self.get_dHdt_nonlinear[flux] = reductions.get_reduction(
                     reduction_output=reduction_output,
                     functor="HelicityNonlinear_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,FLUCS_FLOAT,long long,const FLUCS_COMPLEX (*)[HALFPADDEDSIZE]",
                     complex_output=False,
                 )
                 self.get_dHdt_forcing[flux] = reductions.get_reduction(
                     reduction_output=reduction_output,
                     functor="HelicityForcing_Functor",
-                    input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,long long",
+                    input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                     complex_output=False,
                 )
                 self.get_dHdt_hyperdissipation[flux] = (
@@ -1492,7 +1481,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="HelicityThetapNonlinear_Functor",
-                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,FLUCS_FLOAT,long long,const FLUCS_COMPLEX (*)[HALFPADDEDSIZE]",
                             complex_output=False,
                         )
                     )
@@ -1500,9 +1489,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="HelicityThetapForcing_Functor",
-                            input_args=(
-                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
-                            ),
+                            input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                             complex_output=False,
                         )
                     )
@@ -1528,7 +1515,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="HelicityThetamNonlinear_Functor",
-                            input_args="FLUCS_COMPLEX*,FLUCS_COMPLEX*",
+                            input_args="FLUCS_COMPLEX*,FLUCS_FLOAT,FLUCS_FLOAT,long long,const FLUCS_COMPLEX (*)[HALFPADDEDSIZE]",
                             complex_output=False,
                         )
                     )
@@ -1536,9 +1523,7 @@ class FluxesDiag(FlucsDiagnostic):
                         reductions.get_reduction(
                             reduction_output=reduction_output,
                             functor="HelicityThetamForcing_Functor",
-                            input_args=(
-                                "FLUCS_COMPLEX*,FLUCS_FLOAT,long long"
-                            ),
+                            input_args="const FLUCS_COMPLEX (*)[HALFUNPADDEDSIZE],FLUCS_FLOAT,FLUCS_FLOAT,long long",
                             complex_output=False,
                         )
                     )
@@ -1564,16 +1549,12 @@ class FluxesDiag(FlucsDiagnostic):
 
         # Useful aliases
         current_dt = self.system.float(self.system.current_dt)
+        current_time = self.system.float(self.system.current_time)
         current_step = self.system.int(self.system.current_step)
         adaptive_rate = self.system.float(self.system.adaptive_rate)
 
-        fields = self.system.fields[
-            self.system.current_step % self.system.fields_history_size
-        ]
-        fields_prev = self.system.fields[
-            (self.system.current_step - 1)
-            % self.system.fields_history_size
-        ]
+        fields = self.system.get_fields()
+        fields_prev = self.system.get_fields(1)
 
         # Calculate nonlinear terms for the current fields
         self.system.compute_nonlinear_terms(fields)
@@ -1590,7 +1571,7 @@ class FluxesDiag(FlucsDiagnostic):
 
             # dWdt_nonlinear
             dWdt_nonlinear = self.get_dWdt_nonlinear[flux](
-                fields, dft_bits
+                fields, current_dt, current_time, current_step, dft_bits
             ).get()
             self.save_data(
                 f"{flux}_fluxes/dWdt_nonlinear",
@@ -1599,7 +1580,7 @@ class FluxesDiag(FlucsDiagnostic):
 
             # dWdt_forcing
             dWdt_forcing = self.get_dWdt_forcing[flux](
-                fields, current_dt, current_step
+                fields, current_dt, current_time, current_step
             ).get()
             self.save_data(
                 f"{flux}_fluxes/dWdt_forcing",
@@ -1639,7 +1620,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dWpdt_nonlinear
                 dWpdt_nonlinear = self.get_dWpdt_nonlinear[flux](
-                    fields, dft_bits
+                    fields, current_dt, current_time, current_step, dft_bits
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dWpdt_nonlinear",
@@ -1648,7 +1629,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dWpdt_forcing
                 dWpdt_forcing = self.get_dWpdt_forcing[flux](
-                    fields, current_dt, current_step
+                    fields, current_dt, current_time, current_step
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dWpdt_forcing",
@@ -1685,7 +1666,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dWmdt_nonlinear
                 dWmdt_nonlinear = self.get_dWmdt_nonlinear[flux](
-                    fields, dft_bits
+                    fields, current_dt, current_time, current_step, dft_bits
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dWmdt_nonlinear",
@@ -1694,7 +1675,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dWmdt_forcing
                 dWmdt_forcing = self.get_dWmdt_forcing[flux](
-                    fields, current_dt, current_step
+                    fields, current_dt, current_time, current_step
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dWmdt_forcing",
@@ -1734,7 +1715,7 @@ class FluxesDiag(FlucsDiagnostic):
 
             # dHdt_nonlinear
             dHdt_nonlinear = self.get_dHdt_nonlinear[flux](
-                fields, dft_bits
+                fields, current_dt, current_time, current_step, dft_bits
             ).get()
             self.save_data(
                 f"{flux}_fluxes/dHdt_nonlinear",
@@ -1743,7 +1724,7 @@ class FluxesDiag(FlucsDiagnostic):
 
             # dHdt_forcing
             dHdt_forcing = self.get_dHdt_forcing[flux](
-                fields, current_dt, current_step
+                fields, current_dt, current_time, current_step
             ).get()
             self.save_data(
                 f"{flux}_fluxes/dHdt_forcing",
@@ -1783,7 +1764,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dHpdt_nonlinear
                 dHpdt_nonlinear = self.get_dHpdt_nonlinear[flux](
-                    fields, dft_bits
+                    fields, current_dt, current_time, current_step, dft_bits
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dHpdt_nonlinear",
@@ -1792,7 +1773,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dHpdt_forcing
                 dHpdt_forcing = self.get_dHpdt_forcing[flux](
-                    fields, current_dt, current_step
+                    fields, current_dt, current_time, current_step
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dHpdt_forcing",
@@ -1829,7 +1810,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dHmdt_nonlinear
                 dHmdt_nonlinear = self.get_dHmdt_nonlinear[flux](
-                    fields, dft_bits
+                    fields, current_dt, current_time, current_step, dft_bits
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dHmdt_nonlinear",
@@ -1838,7 +1819,7 @@ class FluxesDiag(FlucsDiagnostic):
 
                 # dHmdt_forcing
                 dHmdt_forcing = self.get_dHmdt_forcing[flux](
-                    fields, current_dt, current_step
+                    fields, current_dt, current_time, current_step
                 ).get()
                 self.save_data(
                     f"{flux}_fluxes/dHmdt_forcing",

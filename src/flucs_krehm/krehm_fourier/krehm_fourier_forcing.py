@@ -31,7 +31,7 @@ class KREHMFourierElsasserForcing(FourierSystemForcing):
         system = self.system
 
         # Set ranges and number of forced modes
-        self.setup_forcing_range_kz_kperp()
+        self.setup_forcing_range_kzkperp()
 
         # Validate energy injection rate and injection imbalance
         energy_injection_rate = system.input["forcing.energy_injection_rate"]
@@ -100,7 +100,7 @@ class KREHMFourierMeyrandForcing(FourierSystemForcing):
         system = self.system
 
         # Set ranges and number of forced modes
-        self.setup_forcing_range_kz_kperp()
+        self.setup_forcing_range_kzkperp()
 
         # Validate energy injection rates and injection imbalance
         energy_injection_rate_phi = (
