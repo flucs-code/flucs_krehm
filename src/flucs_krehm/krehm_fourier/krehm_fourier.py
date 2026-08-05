@@ -268,7 +268,7 @@ class KREHMFourier(FourierSystem):
                 Wm_target = 0.5 * (1.0 - imbalance) * energy
 
                 # Construct wavenumbers
-                kx, ky, kz = self.get_broadcast_wavenumbers()
+                kz, kx, ky = self.get_broadcast_wavenumbers()
                 kperp2 = kx**2 + ky**2
 
                 valid_kz = np.zeros_like(kz, dtype=bool)
@@ -394,7 +394,7 @@ class KREHMFourier(FourierSystem):
         )
 
         # Get wavenumbers
-        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kz, kx, ky = self.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
 
         # Get parameters
@@ -480,7 +480,7 @@ class KREHMFourier(FourierSystem):
 
         """
         # Construct wavenumbers
-        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kz, kx, ky = self.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
 
         # Construct ion FLR functions
@@ -508,7 +508,7 @@ class KREHMFourier(FourierSystem):
 
         """
         # Construct wavenumbers
-        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kz, kx, ky = self.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
 
         # Construct ion FLR functions
