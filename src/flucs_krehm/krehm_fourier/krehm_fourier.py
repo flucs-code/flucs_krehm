@@ -73,14 +73,14 @@ class KREHMFourier(FourierSystem):
         self.find_derivatives_kernel = KernelWrapper(
             system=self,
             cuda_kernel_name="find_derivatives",
-            grid=(self.half_padded_cuda_grid_size,),
+            grid=(self.half_cuda_grid_size,),
             block=(self.cuda_block_size,),
         )
 
         self.find_nonlinear_bits_kernel = KernelWrapper(
             system=self,
             cuda_kernel_name="find_nonlinear_bits",
-            grid=(self.full_padded_cuda_grid_size,),
+            grid=(self.full_cuda_grid_size,),
             block=(self.cuda_block_size,),
             shared_mem=nonlinear_bits_shared_mem,
         )
@@ -267,8 +267,11 @@ class KREHMFourier(FourierSystem):
                 Wp_target = 0.5 * (1.0 + imbalance) * energy
                 Wm_target = 0.5 * (1.0 - imbalance) * energy
 
-                # Construct wavenumbers
-                kz, kx, ky = self.get_broadcast_wavenumbers()
+                # Construct initial conditions on the solved grid
+                solved_grid_mask = self.get_solved_grid_mask().astype(bool)
+                solved_grid_tuple = self.get_solved_grid_tuple()
+
+                kz, kx, ky = self.get_solved_wavenumbers()
                 kperp2 = kx**2 + ky**2
 
                 valid_kz = np.zeros_like(kz, dtype=bool)
@@ -281,8 +284,11 @@ class KREHMFourier(FourierSystem):
                 )
                 envelope[~((kperp2 > 0.0) & valid_kz)] = 0.0
 
-                # Weight for wavenumbe summation
-                weight = np.ones((1, 1, self.half_ny), dtype=kperp2.dtype)
+                # Weight for wavenumber summation
+                weight = np.ones(
+                    (1, 1, self.half_ny_unpadded),
+                    dtype=kperp2.dtype,
+                )
                 weight[..., 1:] = 2.0
 
                 # Construct thetas with random phases
@@ -297,7 +303,7 @@ class KREHMFourier(FourierSystem):
                             1j * random.uniform(
                                 0.0,
                                 2.0 * np.pi,
-                                size=self.half_unpadded_tuple,
+                                size=solved_grid_tuple,
                             )
                         )
                     ).astype(self.complex)
@@ -305,14 +311,16 @@ class KREHMFourier(FourierSystem):
                     # Handle reality condition
                     theta_ky0 = theta[:, :, 0]
                     theta_ky0[0, 0] = 0  # should be zero already
-                    theta_ky0[0, self.half_nx:] = np.conj(
-                        theta_ky0[0, 1:self.half_nx][::-1]
+                    theta_ky0[0, self.half_nx_unpadded:] = np.conj(
+                        theta_ky0[0, 1:self.half_nx_unpadded][::-1]
                     )
-                    theta_ky0[self.half_nz:, 0] = np.conj(
-                        theta_ky0[1:self.half_nz, 0][::-1]
+                    theta_ky0[self.half_nz_unpadded:, 0] = np.conj(
+                        theta_ky0[1:self.half_nz_unpadded, 0][::-1]
                     )
-                    theta_ky0[self.half_nz:, 1:] = np.conj(
-                        theta_ky0[1:self.half_nz, 1:][::-1, ::-1]
+                    theta_ky0[self.half_nz_unpadded:, 1:] = np.conj(
+                        theta_ky0[
+                            1:self.half_nz_unpadded, 1:
+                        ][::-1, ::-1]
                     )
 
                     theta[:, :, 0] = theta_ky0[:, :]
@@ -323,8 +331,11 @@ class KREHMFourier(FourierSystem):
                     ).real
                     thetas.append(np.sqrt(target / W_theta) * theta)
 
-                # Unpack thetas
-                thetap, thetam = thetas
+                # Embed the solved modes in the full Fourier grid
+                thetap = np.zeros(self.half_tuple, dtype=self.complex)
+                thetam = np.zeros(self.half_tuple, dtype=self.complex)
+                thetap[solved_grid_mask] = thetas[0].reshape(-1)
+                thetam[solved_grid_mask] = thetas[1].reshape(-1)
 
                 # Convert to evolved fields
                 phi, apar = self.compute_fields_from_thetas(thetap, thetam)
@@ -388,7 +399,7 @@ class KREHMFourier(FourierSystem):
             (
                 self.number_of_fields,
                 self.number_of_fields,
-                *self.half_unpadded_tuple
+                *self.half_tuple
             ),
             dtype=self.complex,
         )
@@ -398,9 +409,7 @@ class KREHMFourier(FourierSystem):
         kperp2 = kx**2 + ky**2
 
         # Get parameters
-        rhoi = self.rhoi
         de = self.de
-        ZTe_over_Ti = self.ZTe_over_Ti
 
         # Construct useful functions
         taubarinv, one_minus_gamma0_over_alpha = (
