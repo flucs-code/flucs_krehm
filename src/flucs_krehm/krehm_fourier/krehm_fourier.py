@@ -267,11 +267,11 @@ class KREHMFourier(FourierSystem):
                 Wp_target = 0.5 * (1.0 + imbalance) * energy
                 Wm_target = 0.5 * (1.0 - imbalance) * energy
 
-                # Construct initial conditions on the solved grid
+                # Construct initial conditions on the solved modes
                 solved_grid_mask = self.get_solved_grid_mask().astype(bool)
-                solved_grid_tuple = self.get_solved_grid_tuple()
+                number_of_solved_modes = np.count_nonzero(solved_grid_mask)
 
-                kz, kx, ky = self.get_solved_wavenumbers()
+                kz, kx, ky = self.get_broadcast_wavenumbers()
                 kperp2 = kx**2 + ky**2
 
                 valid_kz = np.zeros_like(kz, dtype=bool)
@@ -282,14 +282,18 @@ class KREHMFourier(FourierSystem):
                 envelope = (kperp2 ** self.input["init.power"]) * np.exp(
                     -2.0 * (kperp2 /  self.input["init.width"] ** 2)
                 )
-                envelope[~((kperp2 > 0.0) & valid_kz)] = 0.0
+                envelope[
+                    ~((kperp2 > 0.0) & valid_kz & solved_grid_mask)
+                ] = 0.0
 
                 # Weight for wavenumber summation
                 weight = np.ones(
-                    (1, 1, self.half_ny_unpadded),
+                    (1, 1, self.half_ny),
                     dtype=kperp2.dtype,
                 )
                 weight[..., 1:] = 2.0
+
+                conjugate_ikx = (-np.arange(self.nx)) % self.nx
 
                 # Construct thetas with random phases
                 random = np.random.default_rng(self.input["init.rand_seed"])
@@ -297,33 +301,23 @@ class KREHMFourier(FourierSystem):
 
                 for target in (Wp_target, Wm_target):
                     # Base object
-                    theta = (
-                        envelope
+                    theta = np.zeros(self.half_tuple, dtype=self.complex)
+                    theta[solved_grid_mask] = (
+                        envelope[solved_grid_mask]
                         * np.exp(
                             1j * random.uniform(
                                 0.0,
                                 2.0 * np.pi,
-                                size=solved_grid_tuple,
+                                size=number_of_solved_modes,
                             )
                         )
                     ).astype(self.complex)
 
                     # Handle reality condition
-                    theta_ky0 = theta[:, :, 0]
-                    theta_ky0[0, 0] = 0  # should be zero already
-                    theta_ky0[0, self.half_nx_unpadded:] = np.conj(
-                        theta_ky0[0, 1:self.half_nx_unpadded][::-1]
+                    theta[-1, :, 0] = np.conj(
+                        theta[+1, conjugate_ikx, 0]
                     )
-                    theta_ky0[self.half_nz_unpadded:, 0] = np.conj(
-                        theta_ky0[1:self.half_nz_unpadded, 0][::-1]
-                    )
-                    theta_ky0[self.half_nz_unpadded:, 1:] = np.conj(
-                        theta_ky0[
-                            1:self.half_nz_unpadded, 1:
-                        ][::-1, ::-1]
-                    )
-
-                    theta[:, :, 0] = theta_ky0[:, :]
+                    theta[~solved_grid_mask] = 0
 
                     # Scale by free-energy contribution
                     W_theta = 0.5 * np.sum(
@@ -331,11 +325,8 @@ class KREHMFourier(FourierSystem):
                     ).real
                     thetas.append(np.sqrt(target / W_theta) * theta)
 
-                # Embed the solved modes in the full Fourier grid
-                thetap = np.zeros(self.half_tuple, dtype=self.complex)
-                thetam = np.zeros(self.half_tuple, dtype=self.complex)
-                thetap[solved_grid_mask] = thetas[0].reshape(-1)
-                thetam[solved_grid_mask] = thetas[1].reshape(-1)
+                # Unpack thetas
+                thetap, thetam = thetas
 
                 # Convert to evolved fields
                 phi, apar = self.compute_fields_from_thetas(thetap, thetam)
