@@ -145,6 +145,11 @@ def plot_struct_func1d_vs_dimension(post, args):
     ax.set_xscale("log")
     ax.set_yscale("log")
 
+    
+
+    ax.plot(dimension,dimension**(2*int(variable_name)/3))
+
+
     ax.legend()
 
     # Assign figure name based on last file
