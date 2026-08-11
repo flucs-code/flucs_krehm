@@ -14,6 +14,71 @@ if TYPE_CHECKING:
     from flucs_krehm.krehm_fourier.krehm_fourier import KREHMFourier
 
 
+def _half_complex_blocks(system):
+    """
+    Returns the (unpadded_slice, padded_slice) pairs for the kz and kx axes of
+    a half-complex array.
+
+    kx and kz are fftfreq-ordered, so the negative-frequency half of each axis
+    lives at the *end* of the axis. Zero-padding therefore means moving those
+    blocks out to the end of the longer axis rather than leaving them in place,
+    which is why cp.fft's `s=` argument cannot be used to do this.
+    """
+    blocks = []
+    for n, half_n, padded_n in (
+        (system.nz, system.half_nz, system.padded_nz),
+        (system.nx, system.half_nx, system.padded_nx),
+    ):
+        n_negative = n - half_n
+        blocks.append(
+            (
+                (slice(0, half_n), slice(0, half_n)),
+                (slice(half_n, n), slice(padded_n - n_negative, padded_n)),
+            )
+        )
+
+    return blocks
+
+
+def pad_half_complex(array, system):
+    """
+    Zero-pads a half-complex array with trailing shape
+    system.half_unpadded_tuple onto the padded Fourier grid, so that products
+    formed from it in real space are free of aliasing.
+    """
+    padded = cp.zeros(
+        array.shape[:-3] + system.half_padded_tuple, dtype=array.dtype
+    )
+
+    (z_blocks, x_blocks) = _half_complex_blocks(system)
+    iky = slice(0, system.half_ny)
+
+    for ikz, ikz_padded in z_blocks:
+        for ikx, ikx_padded in x_blocks:
+            padded[..., ikz_padded, ikx_padded, iky] = array[..., ikz, ikx, iky]
+
+    return padded
+
+
+def unpad_half_complex(array, system):
+    """
+    Inverse of pad_half_complex: truncates a padded half-complex array back
+    onto the unpadded Fourier grid.
+    """
+    unpadded = cp.zeros(
+        array.shape[:-3] + system.half_unpadded_tuple, dtype=array.dtype
+    )
+
+    (z_blocks, x_blocks) = _half_complex_blocks(system)
+    iky = slice(0, system.half_ny)
+
+    for ikz, ikz_padded in z_blocks:
+        for ikx, ikx_padded in x_blocks:
+            unpadded[..., ikz, ikx, iky] = array[..., ikz_padded, ikx_padded, iky]
+
+    return unpadded
+
+
 class FreeEnergyDiag(FlucsDiagnostic):
     """
     Computes quantities related to the free energy, including contributions to
@@ -1895,73 +1960,99 @@ class CL04Anisotropy(FlucsDiagnostic):
         nkperp = self.system.shell_nkperp
         kperp = cp.asarray(self.system.shell_kperp)
 
+        # Width of the kperp shells. This must match the binning used by the
+        # framework's shell reductions, i.e. the half-open bins
+        # [kperp[i], kperp[i] + bin_width) of _compute_kperp_shells().
+        bin_width = (
+            self.system.shell_kperp_max - self.system.shell_kperp_min
+        ) / nkperp
+
+        # Modes with ky > 0 stand in for their conjugate partner in the
+        # half-complex representation, exactly as the CUDA shell-sum kernels
+        # handle it (see cuda/reductions.cuh).
+        hermitian_weight = cp.where(ky > 0, 2.0, 1.0)
+
+        kperp_grid = cp.sqrt(kx**2 + ky**2)
+
         kpar = cp.zeros(nkperp)
 
-        deltaBz = cp.sqrt(2) * phi
+        # delta_B_par follows from the density contribution to the free energy,
+        # which is 2 * ZTe_over_Ti * |phi|^2 in the eRMHD limit (see
+        # FreeEnergyDens_Functor in krehm_fourier.cu).
+        deltaBz = cp.sqrt(2.0 * self.system.ZTe_over_Ti) * phi
         deltaBx = 1j * ky * apar
         deltaBy = - 1j * kx * apar
 
         deltaB = cp.stack([deltaBx,deltaBy,deltaBz],axis=0)
-        kperp_dash = cp.sqrt(kx[None,:,:,:]**2 + ky[None,:,:,:]**2)
+        kperp_dash = kperp_grid[None,:,:,:]
 
 
         #done as loop because otherwise too much memory required
         #TODO: use CUDA kernel for speed
         for i,kperp_single in enumerate(kperp):
 
+            shell_mask = (kperp_grid >= kperp_single) & (
+                kperp_grid < kperp_single + bin_width
+            )
 
             deltaB_locmean = cp.where(kperp_dash < kperp_single/2,deltaB,cp.zeros_like(deltaB))
             deltaB_locmean[2] = cp.zeros_like(deltaB[0])#the z-component of mean-local field is just the guide field
 
 
-            deltaB_locfluc = cp.where(kperp_dash > kperp_single/2,deltaB,cp.zeros_like(deltaB))
+            deltaB_locfluc = cp.where(kperp_dash >= kperp_single/2,deltaB,cp.zeros_like(deltaB))
 
             grad_deltaB_locfluc = 1j * cp.einsum('imln,jmln->ijmln',kvec,deltaB_locfluc)
 
-
+            # The product below is quadratic, so it is formed on the padded
+            # grid to avoid aliasing power back onto the resolved modes, in the
+            # same way the solver evaluates its nonlinear terms.
             deltaB_locmean_realspace = cp.fft.irfftn(
-                deltaB_locmean,
+                pad_half_complex(deltaB_locmean, self.system),
                 norm="forward",
                 axes=(-3,-2,-1),
-                s=self.system.full_unpadded_tuple,
+                s=self.system.full_padded_tuple,
             )
 
             grad_deltaB_locfluc_realspace = cp.fft.irfftn(
-                grad_deltaB_locfluc,
+                pad_half_complex(grad_deltaB_locfluc, self.system),
                 norm="forward",
                 axes=(-3,-2,-1),
-                s=self.system.full_unpadded_tuple,
+                s=self.system.full_padded_tuple,
             )
 
-            B_locmean_realspace = deltaB_locmean_realspace
+            B_locmean_realspace = deltaB_locmean_realspace.copy()
             B_locmean_realspace[2] = cp.ones_like(B_locmean_realspace[2])
 
             nl_term_realspace = cp.einsum('ilmn,ijlmn->jlmn',B_locmean_realspace,grad_deltaB_locfluc_realspace)
 
-            nl_term = cp.fft.rfftn(
-                nl_term_realspace,
-                norm="forward",
-                axes = (-3,-2,-1),
+            nl_term = unpad_half_complex(
+                cp.fft.rfftn(
+                    nl_term_realspace,
+                    norm="forward",
+                    axes = (-3,-2,-1),
+                ),
+                self.system,
             )
 
-            nl_term_sqrd = cp.einsum('ijkm,ijkm->jkm',cp.conj(nl_term),nl_term)
+            nl_term_sqrd = cp.einsum(
+                'ijkm,ijkm->jkm', cp.conj(nl_term), nl_term
+            ).real
 
-            nl_term_sqrd_limited = cp.where(
-                (cp.sqrt(kx**2 + ky**2) < kperp_single + 1) & (cp.sqrt(kx**2 + ky**2) >= kperp_single),
-                nl_term_sqrd,
-                cp.zeros_like(nl_term_sqrd)
-            )
-            
-            deltaB_locfluc_sqrd = cp.einsum('ijkm,ijkm->jkm',cp.conj(deltaB_locfluc),deltaB_locfluc)
+            deltaB_locfluc_sqrd = cp.einsum(
+                'ijkm,ijkm->jkm', cp.conj(deltaB_locfluc), deltaB_locfluc
+            ).real
 
-            deltaB_locfluc_sqrd_limited = cp.where(
-                (cp.sqrt(kx**2 + ky**2) < kperp_single + 1) & (cp.sqrt(kx**2 + ky**2) >= kperp_single),
-                deltaB_locfluc_sqrd,
-                cp.zeros_like(deltaB_locfluc_sqrd)
-            )
+            weight = cp.where(shell_mask, hermitian_weight, 0.0)
 
-            kpar[i] = cp.sqrt(
-                cp.abs(cp.sum(nl_term_sqrd_limited)/cp.sum(deltaB_locfluc_sqrd_limited))
+            numerator = cp.sum(weight * nl_term_sqrd)
+            denominator = cp.sum(weight * deltaB_locfluc_sqrd)
+
+            # An empty (or zero-power) shell is reported as NaN rather than
+            # silently becoming 0/0.
+            kpar[i] = cp.where(
+                denominator > 0.0,
+                cp.sqrt(cp.abs(numerator / cp.where(denominator > 0.0, denominator, 1.0))),
+                cp.nan,
             )
 
         self.save_data('kpar',kpar.get())
@@ -1979,6 +2070,7 @@ class StructureFunctionDiag(FlucsDiagnostic):
         "difference_locations": list(),
         "orders": [2,3,4],
         "number_points": int(1e5),
+        "resample_points": False,
         "compute_on_gpu": True,
     }
 
@@ -2003,7 +2095,7 @@ class StructureFunctionDiag(FlucsDiagnostic):
 
             return slice(*(get_index(p) for p in parts))
         
-        izs,ixs,iys = generate_random_gridpoints_in_realspace(self.number_points,self.system)
+        self.izs,self.ixs,self.iys = generate_random_gridpoints_in_realspace(self.number_points,self.system)
 
         for location in self.difference_locations:
             for order in self.orders:
@@ -2058,13 +2150,16 @@ class StructureFunctionDiag(FlucsDiagnostic):
                 )
 
 
+            # Every free variable used in the body must be captured by value
+            # here, otherwise all the calculators end up sharing the last
+            # location's slices.
             def slice_calculator(
                 loc_name=loc_name,
                 orders=self.orders,
                 ifield=ifield,
-                iz=ilz,
-                ix=ilx,
-                iy=ily,
+                ilz=ilz,
+                ilx=ilx,
+                ily=ily,
             ):
                 fields = cp.asarray(self.system.realspace_fields)
                 ilz_grid = cp.arange(self.system.nz)[ilz]
@@ -2078,7 +2173,11 @@ class StructureFunctionDiag(FlucsDiagnostic):
                 chunk = max(1, budget // (2 * bytes_per_point))
 
                 for s in range(0, self.number_points, chunk):
-                    zc, xc, yc = izs[s:s+chunk], ixs[s:s+chunk], iys[s:s+chunk]
+                    zc, xc, yc = (
+                        self.izs[s:s+chunk],
+                        self.ixs[s:s+chunk],
+                        self.iys[s:s+chunk],
+                    )
 
                     diff = fields[
                         cp.arange(self.system.number_of_fields)[ifield][None, :, None, None, None],
@@ -2106,6 +2205,13 @@ class StructureFunctionDiag(FlucsDiagnostic):
         pass
     
     def execute(self) -> None:
+        if self.resample_points:
+            self.izs,self.ixs,self.iys = (
+                generate_random_gridpoints_in_realspace(
+                    self.number_points, self.system
+                )
+            )
+
         if self.compute_on_gpu:
             self.system.get_realspace_fields_gpu()
         else:
@@ -2113,17 +2219,77 @@ class StructureFunctionDiag(FlucsDiagnostic):
 
         for slice_calculator in self.slice_calculators:
             slice_calculator()
-            
+
 
 def calculate_lperp(lx,ly,system):
+    """
+    Returns the grid of perpendicular separations |lperp|.
+
+    Separations are taken in the minimum-image convention, so the largest
+    separation resolved by a periodic box is min(Lx, Ly) / 2. Beyond that only
+    the corners of the box contribute and the shells are no longer sampled
+    isotropically.
+    """
     dlperp = min(
         (l[1] for l in (lx,ly)),
     )
-    lx_max = abs(lx[system.nx - 1])
-    ly_max = abs(ly[system.ny - 1])
-    lperp_max = cp.sqrt(lx_max**2+ly_max**2)
+    lperp_max = 0.5 * min(
+        system.input["dimensions.Lx"],
+        system.input["dimensions.Ly"],
+    )
     nlperp = int(cp.rint(lperp_max / dlperp).item()) + 1
     return dlperp * cp.arange(nlperp,dtype=system.float)
+
+def calculate_lperp_bins(lx,ly,lperp,system,name=""):
+    """
+    Bins the perpendicular separation vectors of the grid into |lperp| shells.
+
+    The separations are taken in the minimum-image convention: an offset of lx
+    close to Lx is really a separation of lx - Lx. Separations that fall
+    outside the lperp grid (the corners of the box) are dropped, and, since the
+    structure functions are even in the separation vector, only the ly >= 0
+    half of the remainder is kept.
+
+    Returns
+    -------
+    ilx_v, ily_v : cp.ndarray
+        Grid-index offsets of the retained separation vectors.
+    bins : cp.ndarray
+        Index of the lperp shell each retained separation vector belongs to.
+    counts : cp.ndarray
+        Number of retained separation vectors in each lperp shell.
+    """
+    Lx = system.input["dimensions.Lx"]
+    Ly = system.input["dimensions.Ly"]
+
+    # Minimum-image separations
+    dx = lx - Lx * cp.rint(lx / Lx)
+    dy = ly - Ly * cp.rint(ly / Ly)
+
+    dx_grid, dy_grid = cp.meshgrid(dx, dy, indexing='ij')
+
+    R = cp.sqrt(dx_grid**2 + dy_grid**2)
+    dlperp = lperp[1] - lperp[0]
+    idx = cp.rint(R / dlperp).astype(cp.int64)
+
+    valid = (idx < lperp.size) & (dy_grid >= 0)
+    bins = idx[valid]
+
+    # Number of separation offsets in each shell; there should be no empty
+    # shells.
+    counts = cp.bincount(bins, minlength=lperp.size)
+    if bool((counts == 0).any()):
+        raise ValueError(
+            f"{name}: empty lperp shell(s) encountered."
+        )
+
+    ilx,ily = cp.meshgrid(
+        cp.arange(system.nx),
+        cp.arange(system.ny),
+        indexing='ij'
+    )
+
+    return ilx[valid], ily[valid], bins, counts
 
 def generate_random_gridpoints_in_realspace(number_points,system):
     rng = cp.random.default_rng()
@@ -2146,6 +2312,7 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
         "fields": [0,1],
         "orders": [2,3,4],
         "number_points": int(1e5),
+        "resample_points": False,
         "compute_on_gpu": True,
     }
 
@@ -2165,8 +2332,9 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
             raise ValueError(
                 f"{self.name} only supports 1D spectra {valid_directions}. ly and lx are yet to be added."
             )
-        
-        
+
+        self.directions = directions
+
         self.izs,self.ixs,self.iys = generate_random_gridpoints_in_realspace(self.number_points,self.system)
 
 
@@ -2215,6 +2383,13 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
         pass
     
     def execute(self) -> None:
+        if self.resample_points:
+            self.izs,self.ixs,self.iys = (
+                generate_random_gridpoints_in_realspace(
+                    self.number_points, self.system
+                )
+            )
+
         if self.compute_on_gpu:
             self.system.get_realspace_fields_gpu()
         else:
@@ -2230,9 +2405,8 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
                         diff = field_realspace[
                             (self.izs[:,None] +ilz[None,:]) % self.system.nz,
                             self.ixs[:,None],
-                            self.iys[:,None] 
+                            self.iys[:,None]
                         ]
-                        print(f'RISHIN ALERT: {diff.shape} should be (num_points,nz)')
 
                         centers = field_realspace[
                             self.izs[:,None],
@@ -2243,34 +2417,22 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
                         diff -= centers
                         mag = cp.abs(diff)
                         for p in self.orders:
-                            acc = (mag**p).sum(axis=0)
+                            acc = (mag**p).sum(axis=0) / self.number_points
                             self.save_data(
-                                f"{direction}/{p}",
+                                f"{field}/{direction}/{p}",
                                 acc.get()
                             )
-                    
+
                     case "lperp":
 
-                        Lx,Ly = cp.meshgrid(self.lx,self.ly,indexing='ij')
-                        R = cp.sqrt(Lx**2 + Ly**2)
-                        dlperp = self.lperp[1] - self.lperp[0]
-                        idx = cp.rint(R / dlperp).astype(cp.int64)
-                        valid = idx < self.lperp.size
-                        bins = idx[valid]
-                        counts = cp.bincount(bins,minlength=self.lperp.size)
-                        if bool((counts == 0).any()):
-                            raise ValueError(
-                                f"{self.name}: empty lperp shell(s) encountered."
-                            )
-
-                        ilx,ily = cp.meshgrid(
-                            cp.arange(self.system.nx),
-                            cp.arange(self.system.ny),
-                            indexing='ij'
+                        ilx_v, ily_v, bins, counts = calculate_lperp_bins(
+                            self.lx,
+                            self.ly,
+                            self.lperp,
+                            self.system,
+                            name=self.name,
                         )
 
-                        ilx_v = ilx[valid]
-                        ily_v = ily[valid]
                         acc = {p: cp.zeros(ilx_v.size, dtype=cp.float64) for p in self.orders}
 
                         pow_buf = None
@@ -2304,7 +2466,7 @@ class StructureFunctionDiag1D(FlucsDiagnostic):
 
 class AlignmentDiag(FlucsDiagnostic):
     """
-    Computes alignment angle quanitites, for cos(theta) = <|delta z_1 x delta z_2|>/ <|delta z1||delta z2|>, where z1 and z2 are fields. 
+    Computes alignment angle quantities, for sin(theta) = <|delta z_1 x delta z_2|>/ <|delta z1||delta z2|>, where z1 and z2 are fields.
     The numerator and denominator are saved separately (so they can be time averaged in post).
     """
     name = "alignment_angle"
@@ -2313,6 +2475,7 @@ class AlignmentDiag(FlucsDiagnostic):
         "directions": ["lperp"],
         "angle_between": ["zp_zm","gradBpar_Bperp","Bperp_gradLaplacianBperp"],
         "number_points": int(1e5),
+        "resample_points": False,
     }
 
     def init_vars(self):
@@ -2339,7 +2502,10 @@ class AlignmentDiag(FlucsDiagnostic):
             raise ValueError(
                 f"{self.name} only supports the following field options {valid_angle_between}."
             )
-        
+
+        self.directions = directions
+        self.angle_between = angle_between
+
         self.izs,self.ixs,self.iys = generate_random_gridpoints_in_realspace(self.number_points,self.system)
 
 
@@ -2439,7 +2605,9 @@ class AlignmentDiag(FlucsDiagnostic):
                 phi = fields[0]
                 apar = fields[1]
 
-                deltaBz = cp.sqrt(2) * phi
+                # See the comment in CL04Anisotropy.execute() for the
+                # delta_B_par normalisation.
+                deltaBz = cp.sqrt(2.0 * self.system.ZTe_over_Ti) * phi
                 deltaBx = 1j * ky * apar
                 deltaBy = - 1j * kx * apar
 
@@ -2477,6 +2645,13 @@ class AlignmentDiag(FlucsDiagnostic):
 
     
     def execute(self):
+        if self.resample_points:
+            self.izs,self.ixs,self.iys = (
+                generate_random_gridpoints_in_realspace(
+                    self.number_points, self.system
+                )
+            )
+
         for angle_between in self.angle_between:
             vec_field1,vec_field2 = self.get_relevant_fields(angle_between) #fields should have shape (3,nx,ny,nz) 
             for direction in self.directions:
@@ -2523,30 +2698,13 @@ class AlignmentDiag(FlucsDiagnostic):
                         )
 
                     case 'lperp':
-                        Lx,Ly = cp.meshgrid(self.lx,self.ly,indexing='ij')
-                        R = cp.sqrt(Lx**2 + Ly**2)
-                        dlperp = self.lperp[1] - self.lperp[0]
-                        idx = cp.rint(R / dlperp).astype(cp.int64)
-                        valid = idx < self.lperp.size
-                        bins = idx[valid]
-
-                        # Number of separation offsets in each shell; there
-                        # should be no empty shells.
-                        counts = cp.bincount(bins, minlength=self.lperp.size)
-                        if bool((counts == 0).any()):
-                            print(counts)
-                            raise ValueError(
-                                f"{self.name}: empty lperp shell(s) encountered."
-                            )
-
-                        ilx,ily = cp.meshgrid(
-                            cp.arange(self.system.nx),
-                            cp.arange(self.system.ny),
-                            indexing='ij'
+                        ilx_v, ily_v, bins, counts = calculate_lperp_bins(
+                            self.lx,
+                            self.ly,
+                            self.lperp,
+                            self.system,
+                            name=self.name,
                         )
-
-                        ilx_v = ilx[valid]
-                        ily_v = ily[valid]
 
                         num_acc = cp.zeros(ilx_v.size, dtype=cp.float64)
                         den_acc = cp.zeros(ilx_v.size, dtype=cp.float64)
