@@ -90,6 +90,7 @@ __global__ void find_derivatives(
         return;
     }
 
+    // Wavenumbers and derivatives
     const FLUCS_FLOAT kx = kx_from_ikx(ikx);
     const FLUCS_FLOAT ky = ky_from_iky(iky);
 
@@ -98,27 +99,17 @@ __global__ void find_derivatives(
 
     const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
 
+    // Fields
     const FLUCS_COMPLEX phi = fields_global[0][index];
     const FLUCS_COMPLEX apar = fields_global[1][index];
 
-    // dxphi
     dft_derivatives_global[0][index] = dx * phi;
-
-    // dyphi
     dft_derivatives_global[1][index] = dy * phi;
-
-    // dxapar
     dft_derivatives_global[2][index] = dx * apar;
-
-    // dyapar
     dft_derivatives_global[3][index] = dy * apar;
-
-    // [(1 - Gamma0) / alpha] kperp2phi
     dft_derivatives_global[4][index] = (
         one_minus_gamma0_over_alpha(kperp2) * kperp2 * phi
     );
-
-    // kperp2apar
     dft_derivatives_global[5][index] = kperp2 * apar;
 
 }
@@ -126,66 +117,71 @@ __global__ void find_derivatives(
 // Finds the nonlinear combinations of (real-space) derivatives required to 
 // construct the nonlinear terms
 __global__ void find_nonlinear_bits(
-    FLUCS_FLOAT real_derivatives_and_bits_global[NUMBER_OF_DFT_COMBINED][FULLSIZE],
+    const FLUCS_FLOAT real_derivatives_global
+        [NUMBER_OF_DFT_DERIVATIVES][FULLSIZE],
+    FLUCS_FLOAT real_bits_global[NUMBER_OF_DFT_BITS][FULLSIZE],
+    const bool calculate_cfl,
     FLUCS_FLOAT* cfl_rate_global
 ){
-    const size_t real_index = blockDim.x * blockIdx.x + threadIdx.x;
-    const bool in_bounds = real_index < FULLSIZE;
+    const size_t index = blockDim.x * blockIdx.x + threadIdx.x;
+    const bool in_bounds = index < FULLSIZE;
 
-    // Inactive threads do not contribute to the cfl reduction 
+    // Inactive threads contribute zero but must participate in the
+    // block-wide CFL reduction.
     const FLUCS_FLOAT dxphi = in_bounds
-        ? real_derivatives_and_bits_global[0][real_index]
+        ? real_derivatives_global[0][index]
         : (FLUCS_FLOAT)0;
+
     const FLUCS_FLOAT dyphi = in_bounds
-        ? real_derivatives_and_bits_global[1][real_index]
+        ? real_derivatives_global[1][index]
         : (FLUCS_FLOAT)0;
 
     const FLUCS_FLOAT dxapar = in_bounds
-        ? real_derivatives_and_bits_global[2][real_index]
+        ? real_derivatives_global[2][index]
         : (FLUCS_FLOAT)0;
+
     const FLUCS_FLOAT dyapar = in_bounds
-        ? real_derivatives_and_bits_global[3][real_index]
+        ? real_derivatives_global[3][index]
         : (FLUCS_FLOAT)0;
 
-    const FLUCS_FLOAT cfl_phi = flucs_fabs(dxphi) * (NY_UNPADDED / LY)
-        + flucs_fabs(dyphi) * (NX_UNPADDED / LX);
+    if (calculate_cfl) {
+        const FLUCS_FLOAT cfl_phi =
+              flucs_fabs(dxphi) * (NY_UNPADDED / LY)
+            + flucs_fabs(dyphi) * (NX_UNPADDED / LX);
 
-    const FLUCS_FLOAT cfl_apar = flucs_fabs(dxapar) * (NY_UNPADDED / LY)
-        + flucs_fabs(dyapar) * (NX_UNPADDED / LX);
+        const FLUCS_FLOAT cfl_apar =
+              flucs_fabs(dxapar) * (NY_UNPADDED / LY)
+            + flucs_fabs(dyapar) * (NX_UNPADDED / LX);
 
-    // This works fine for de = 0, but we might need to 
-    // include a higher-order perp derivative in CFL
-    // when running with finite de
-    const FLUCS_FLOAT cfl = cfl_phi + cfl_apar;
+        // This is sufficient for de = 0, but a higher-order perpendicular
+        // derivative may be required for finite de.
+        update_cfl(cfl_phi + cfl_apar, cfl_rate_global);
+    }
 
-    update_cfl(cfl, cfl_rate_global);
-
-    // Out-of-bounds threads should not contribute to nonlinear bits
     if (!in_bounds)
         return;
 
-    const FLUCS_FLOAT one_minus_gamma0_over_alpha_kperp2phi = (
-        real_derivatives_and_bits_global[4][real_index]
-    );
-    const FLUCS_FLOAT kperp2apar = (
-        real_derivatives_and_bits_global[5][real_index]
-    );
+    // These arrays may alias, so load every remaining input before writing
+    // any nonlinear product.
+    const FLUCS_FLOAT one_minus_gamma0_over_alpha_kperp2phi =
+        real_derivatives_global[4][index];
+    const FLUCS_FLOAT kperp2apar = real_derivatives_global[5][index];
 
-    real_derivatives_and_bits_global[0][real_index] = (
+    real_bits_global[0][index] = (
         dxphi * one_minus_gamma0_over_alpha_kperp2phi  - dxapar * kperp2apar
     );
-    real_derivatives_and_bits_global[1][real_index] = (
+    real_bits_global[1][index] = (
         dyphi * one_minus_gamma0_over_alpha_kperp2phi  - dyapar * kperp2apar
     );
-    real_derivatives_and_bits_global[2][real_index] = (
+    real_bits_global[2][index] = (
         dxphi * (DE2 * kperp2apar)
         - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dxapar * one_minus_gamma0_over_alpha_kperp2phi
     );
-    real_derivatives_and_bits_global[3][real_index] = (
+    real_bits_global[3][index] = (
         dyphi * (DE2 * kperp2apar)
         - (((FLUCS_FLOAT)0.5) * RHOI2 * ZTE_OVER_TI) * dyapar * one_minus_gamma0_over_alpha_kperp2phi
     );
-    real_derivatives_and_bits_global[4][real_index] = (
+    real_bits_global[4][index] = (
         dxphi * dyapar - dyphi * dxapar
     );
 }

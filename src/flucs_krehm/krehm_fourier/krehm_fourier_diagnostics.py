@@ -1557,7 +1557,13 @@ class FluxesDiag(FlucsDiagnostic):
         fields_prev = self.system.get_fields(1)
 
         # Calculate nonlinear terms for the current fields
-        self.system.compute_nonlinear_terms(fields)
+        self.system.compute_nonlinear_terms(
+            current_dt,
+            current_time,
+            current_step,
+            fields,
+            False,
+        )
         dft_bits = self.system.dft_bits
 
         # Iterate over free-energy fluxes to save
