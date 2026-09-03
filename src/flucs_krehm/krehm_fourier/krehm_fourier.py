@@ -90,18 +90,20 @@ class KREHMFourier(FourierSystem):
             current_time,
             current_step,
             fields,
-            dft_derivatives,
+            memory_dict: dict,
         ) -> None:
+            dft_derivatives = memory_dict["first_intermediates_fourier"]
             self.find_derivatives_kernel(fields, dft_derivatives)
 
         def find_nonlinear_bits_function(
             current_dt,
             current_time,
             current_step,
-            real_derivatives,
-            real_bits,
             calculate_cfl,
+            memory_dict: dict,
         ) -> None:
+            real_derivatives = memory_dict["first_intermediates_real"]
+            real_bits = memory_dict["second_intermediates_real"]
             self.find_nonlinear_bits_kernel(
                 real_derivatives,
                 real_bits,
@@ -110,10 +112,14 @@ class KREHMFourier(FourierSystem):
             )
 
         if not self.input["setup.linear"]:
-            self.dft_derivatives_operation = (
-                self.create_dft_derivatives_operation(
-                    find_derivatives_function=find_derivatives_function,
-                    find_real_bits_function=find_nonlinear_bits_function,
+            self.dft_derivatives_operation, self.dft_bits = (
+                self.create_dealiased_operation(
+                    n_in=self.number_of_dft_derivatives,
+                    n_out=self.number_of_dft_bits,
+                    create_first_intermediates=find_derivatives_function,
+                    create_second_intermediates=find_nonlinear_bits_function,
+                    allocate_additional_memory=None,
+                    combine_first_and_second_intermediates=True,
                 )
             )
 
@@ -122,10 +128,7 @@ class KREHMFourier(FourierSystem):
 
         # First, call FourierSystem's method which allocates
         # self.fields among other things.
-        super()._allocate_memory(
-            allocate_derivatives_and_bits=True,
-            combine_derivatives_and_bits=True
-        )
+        super()._allocate_memory()
 
         # Pointers to phi and apar for easier access
         self.phi = [cp.ndarray((self.nz, self.nx, self.half_ny),
@@ -401,7 +404,6 @@ class KREHMFourier(FourierSystem):
             current_time,
             current_step,
             fields,
-            self.dft_bits,
             calculate_cfl=calculate_cfl,
         )
 
