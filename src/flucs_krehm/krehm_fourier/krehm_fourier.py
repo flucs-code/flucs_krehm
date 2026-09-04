@@ -1,14 +1,12 @@
 """
 Pseudospectral Fourier implementation of the isothermal KREHM system from
-Adkins et al. (2024). The nonlinear term is handled explicitly using the 
-Adams-Bashforth 3-step method.
+Adkins et al. (2024).
 """
 from typing import ClassVar
 
 import cupy as cp
 import numpy as np
 from scipy.special import i0e
-from cupy.cuda import cufft
 from flucs.diagnostic import FlucsDiagnostic
 from flucs.solvers.fourier.fourier_system import FourierSystem, FourierSystemForcing
 from flucs.input import InvalidFlucsInputFileError
@@ -70,30 +68,67 @@ class KREHMFourier(FourierSystem):
             self.cuda_block_size * self.float().nbytes
         )
 
+        # Register kernels
         self.find_derivatives_kernel = KernelWrapper(
             system=self,
             cuda_kernel_name="find_derivatives",
-            grid=(self.half_padded_cuda_grid_size,),
+            grid=(self.half_cuda_grid_size,),
             block=(self.cuda_block_size,),
         )
 
         self.find_nonlinear_bits_kernel = KernelWrapper(
             system=self,
             cuda_kernel_name="find_nonlinear_bits",
-            grid=(self.full_padded_cuda_grid_size,),
+            grid=(self.full_cuda_grid_size,),
             block=(self.cuda_block_size,),
             shared_mem=nonlinear_bits_shared_mem,
         )
+
+        # Register functions
+        def find_derivatives_function(
+            current_dt,
+            current_time,
+            current_step,
+            fields,
+            memory_dict: dict,
+        ) -> None:
+            dft_derivatives = memory_dict["first_intermediates_fourier"]
+            self.find_derivatives_kernel(fields, dft_derivatives)
+
+        def find_nonlinear_bits_function(
+            current_dt,
+            current_time,
+            current_step,
+            calculate_cfl,
+            memory_dict: dict,
+        ) -> None:
+            real_derivatives = memory_dict["first_intermediates_real"]
+            real_bits = memory_dict["second_intermediates_real"]
+            self.find_nonlinear_bits_kernel(
+                real_derivatives,
+                real_bits,
+                calculate_cfl,
+                self.cfl_rate,
+            )
+
+        if not self.input["setup.linear"]:
+            self.dft_derivatives_operation, self.dft_bits = (
+                self.create_dealiased_operation(
+                    n_in=self.number_of_dft_derivatives,
+                    n_out=self.number_of_dft_bits,
+                    create_first_intermediates=find_derivatives_function,
+                    create_second_intermediates=find_nonlinear_bits_function,
+                    allocate_additional_memory=None,
+                    combine_first_and_second_intermediates=True,
+                )
+            )
 
     def _allocate_memory(self):
         """Allocates runtime arrays."""
 
         # First, call FourierSystem's method which allocates
         # self.fields among other things.
-        super()._allocate_memory(
-            allocate_derivatives_and_bits=True,
-            combine_derivatives_and_bits=True
-        )
+        super()._allocate_memory()
 
         # Pointers to phi and apar for easier access
         self.phi = [cp.ndarray((self.nz, self.nx, self.half_ny),
@@ -267,8 +302,11 @@ class KREHMFourier(FourierSystem):
                 Wp_target = 0.5 * (1.0 + imbalance) * energy
                 Wm_target = 0.5 * (1.0 - imbalance) * energy
 
-                # Construct wavenumbers
-                kx, ky, kz = self.get_broadcast_wavenumbers()
+                # Construct initial conditions on the solved modes
+                solved_grid_mask = self.get_solved_grid_mask().astype(bool)
+                number_of_solved_modes = np.count_nonzero(solved_grid_mask)
+
+                kz, kx, ky = self.get_broadcast_wavenumbers()
                 kperp2 = kx**2 + ky**2
 
                 valid_kz = np.zeros_like(kz, dtype=bool)
@@ -279,11 +317,18 @@ class KREHMFourier(FourierSystem):
                 envelope = (kperp2 ** self.input["init.power"]) * np.exp(
                     -2.0 * (kperp2 /  self.input["init.width"] ** 2)
                 )
-                envelope[~((kperp2 > 0.0) & valid_kz)] = 0.0
+                envelope[
+                    ~((kperp2 > 0.0) & valid_kz & solved_grid_mask)
+                ] = 0.0
 
-                # Weight for wavenumbe summation
-                weight = np.ones((1, 1, self.half_ny), dtype=kperp2.dtype)
+                # Weight for wavenumber summation
+                weight = np.ones(
+                    (1, 1, self.half_ny),
+                    dtype=kperp2.dtype,
+                )
                 weight[..., 1:] = 2.0
+
+                conjugate_ikx = (-np.arange(self.nx)) % self.nx
 
                 # Construct thetas with random phases
                 random = np.random.default_rng(self.input["init.rand_seed"])
@@ -291,31 +336,23 @@ class KREHMFourier(FourierSystem):
 
                 for target in (Wp_target, Wm_target):
                     # Base object
-                    theta = (
-                        envelope
+                    theta = np.zeros(self.half_tuple, dtype=self.complex)
+                    theta[solved_grid_mask] = (
+                        envelope[solved_grid_mask]
                         * np.exp(
                             1j * random.uniform(
                                 0.0,
                                 2.0 * np.pi,
-                                size=self.half_unpadded_tuple,
+                                size=number_of_solved_modes,
                             )
                         )
                     ).astype(self.complex)
 
                     # Handle reality condition
-                    theta_ky0 = theta[:, :, 0]
-                    theta_ky0[0, 0] = 0  # should be zero already
-                    theta_ky0[0, self.half_nx:] = np.conj(
-                        theta_ky0[0, 1:self.half_nx][::-1]
+                    theta[-1, :, 0] = np.conj(
+                        theta[+1, conjugate_ikx, 0]
                     )
-                    theta_ky0[self.half_nz:, 0] = np.conj(
-                        theta_ky0[1:self.half_nz, 0][::-1]
-                    )
-                    theta_ky0[self.half_nz:, 1:] = np.conj(
-                        theta_ky0[1:self.half_nz, 1:][::-1, ::-1]
-                    )
-
-                    theta[:, :, 0] = theta_ky0[:, :]
+                    theta[~solved_grid_mask] = 0
 
                     # Scale by free-energy contribution
                     W_theta = 0.5 * np.sum(
@@ -351,32 +388,24 @@ class KREHMFourier(FourierSystem):
         # Do anything model-specific here, then call the parent's method
         super().begin_time_step()
 
-    def compute_nonlinear_terms(self, fields: cp.ndarray) -> None:
+    def compute_nonlinear_terms(
+        self,
+        current_dt,
+        current_time,
+        current_step,
+        fields: cp.ndarray,
+        calculate_cfl,
+    ) -> None:
         """
-        Computes the nonlinear terms for the supplied fields. Here, we also
-        determine the nonlinear CFL coefficient.
-
+        Computes the dealiased nonlinear terms for the supplied fields.
         """
-        self.find_derivatives_kernel(
+        self.dft_derivatives_operation(
+            current_dt,
+            current_time,
+            current_step,
             fields,
-            self.dft_derivatives,
+            calculate_cfl=calculate_cfl,
         )
-        self.cfl_rate[0] = self.float(0.0)
-
-        self.plan_derivatives_c2r.fft(
-            self.dft_derivatives,
-            self.real_derivatives,
-            cufft.CUFFT_INVERSE
-        )
-
-        # NB: real_derivatives and real_bits are the same array
-        self.find_nonlinear_bits_kernel(
-            self.real_derivatives,
-            self.cfl_rate,
-        )
-
-        # NB: real_derivatives and real_bits are the same array
-        self.plan_bits_r2c.fft(self.real_bits, self.dft_bits, cufft.CUFFT_FORWARD)
 
     def finish_time_step(self) -> None:
         super().finish_time_step()
@@ -388,19 +417,17 @@ class KREHMFourier(FourierSystem):
             (
                 self.number_of_fields,
                 self.number_of_fields,
-                *self.half_unpadded_tuple
+                *self.half_tuple
             ),
             dtype=self.complex,
         )
 
         # Get wavenumbers
-        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kz, kx, ky = self.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
 
         # Get parameters
-        rhoi = self.rhoi
         de = self.de
-        ZTe_over_Ti = self.ZTe_over_Ti
 
         # Construct useful functions
         taubarinv, one_minus_gamma0_over_alpha = (
@@ -480,7 +507,7 @@ class KREHMFourier(FourierSystem):
 
         """
         # Construct wavenumbers
-        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kz, kx, ky = self.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
 
         # Construct ion FLR functions
@@ -508,7 +535,7 @@ class KREHMFourier(FourierSystem):
 
         """
         # Construct wavenumbers
-        kx, ky, kz = self.get_broadcast_wavenumbers()
+        kz, kx, ky = self.get_broadcast_wavenumbers()
         kperp2 = kx**2 + ky**2
 
         # Construct ion FLR functions
