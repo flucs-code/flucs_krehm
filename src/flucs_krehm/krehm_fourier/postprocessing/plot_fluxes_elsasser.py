@@ -53,7 +53,7 @@ def plot_fluxes_elsasser(post, args):
         forcing_input = input_file["forcing"]
         if forcing_input["method"] == "elsasser":
             energy_injection_rate = forcing_input["energy_injection_rate"]
-        elif forcing_input["method"] == "meyrand":
+        elif forcing_input["method"] in ["meyrand", "phase"]:
             energy_injection_rate = (
                 + forcing_input["energy_injection_rate_phi"]
                 + forcing_input["energy_injection_rate_apar"]
