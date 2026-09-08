@@ -23,7 +23,7 @@ def plot_1d_helicity(post, args):
     # Initialise plotting
     fig_h, ax_h = plt.subplots(1, 1, layout="constrained")
 
-    ymin = 1e-6
+    ymin = 1e-12
     xscale = "log"
     yscale = "log"
 

@@ -31,7 +31,7 @@ def plot_1d_elsasser(post, args):
     fig_w, ax_w = plt.subplots(1, 1, layout="constrained")
     fig_h, ax_h = plt.subplots(1, 1, layout="constrained")
 
-    ymin = 1e-6
+    ymin = 1e-12
     xscale = "log"
     yscale = "log"
 
