@@ -150,7 +150,7 @@ class KREHMFourierPhaseForcing(FourierSystemForcing):
     
     This differs from the Meyrand forcing in that it uses a phase-control to 
     ensure that it does not introduce additional correlations between the fields 
-    (prevents accumulation of residual energy).
+    (minimises direct accumulation of residual energy).
 
     Parameters
     ----------
