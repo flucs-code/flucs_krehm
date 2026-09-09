@@ -47,43 +47,28 @@ def plot_fluxes_elsasser(post, args):
         sim_label = pl.Path(nc_path).parent.name
         sim_color = plt.cm.rainbow(np.linspace(0, 1, len(nc_paths)))[index]
 
-        # Get injection rates (assumes same forcing for all groups)
-        input_file = post.load_netcdf_input_files(nc_path, groups=groups)[-1]
-
-        forcing_input = input_file["forcing"]
-        if forcing_input["method"] == "elsasser":
-            energy_injection_rate = forcing_input["energy_injection_rate"]
-        elif forcing_input["method"] == "meyrand":
-            energy_injection_rate = (
-                + forcing_input["energy_injection_rate_phi"]
-                + forcing_input["energy_injection_rate_apar"]
-            )
-        else:
-            raise ValueError(
-                f"Unsupported forcing method '{forcing_input['method']}'."
-            )
-
-        injection_imbalance = forcing_input["injection_imbalance"]
-        injection_rates = {
-            "plus": (
-                energy_injection_rate * (1.0 + injection_imbalance) / 2.0
-            ),
-            "minus": (
-                energy_injection_rate * (1.0 - injection_imbalance) / 2.0
-            ),
-        }
-
-        # Read time from NetCDF file
+        # Read data from NetCDF file
         time = post.load_netcdf_variable(nc_path, "time", groups=groups)[0]
+
+        # Load overall forcing rate
+        dWdt_forcing = post.load_netcdf_variable(
+            nc_path,
+            f"fluxes/{dimension_name}_fluxes/dWdt_forcing",
+            groups=groups,
+        )[0]
 
         # Time average
         mask_time = time >= (
             np.min(time) + (1.0 - fraction) * (np.max(time) - np.min(time))
         )
 
+        # Mean measured energy injection rate
+        energy_injection_rate = np.nanmean(dWdt_forcing[mask_time, -1])
+
         dimensions = {}
         nonlinear_fluxes = {}
         nonlinear_fluxes_avg = {}
+        injection_rates = {}
 
         # Iterate over Elsasser fields
         for sign in ["plus", "minus"]:
@@ -92,6 +77,14 @@ def plot_fluxes_elsasser(post, args):
                 variables[sign]["nonlinear"],
                 groups=groups,
             )
+            dWdt_forcing = post.load_netcdf_variable(
+                nc_path,
+                variables[sign]["forcing"],
+                groups=groups,
+            )[0]
+
+            # Mean measured injection rate
+            injection_rates[sign] = np.nanmean(dWdt_forcing[mask_time, -1])
 
             # Validate dimension
             dims = next(dims for dims in reversed(dims_dicts) if dims)
@@ -124,11 +117,6 @@ def plot_fluxes_elsasser(post, args):
 
             # Plot budget terms if required
             if args.budget:
-                dWdt_forcing = post.load_netcdf_variable(
-                    nc_path,
-                    variables[sign]["forcing"],
-                    groups=groups,
-                )[0]
                 dWdt_hyperdissipation = post.load_netcdf_variable(
                     nc_path,
                     variables[sign]["hyperdissipation"],
@@ -136,8 +124,9 @@ def plot_fluxes_elsasser(post, args):
                 )[0]
 
                 forcing_flux = (
-                    injection_rates[sign] - dWdt_forcing[:, mask]
+                    dWdt_forcing[:, -1, None] - dWdt_forcing[:, mask]
                 ) / energy_injection_rate
+                
                 hyperdissipation_flux = (
                     -dWdt_hyperdissipation[:, mask]
                     / energy_injection_rate
@@ -166,7 +155,7 @@ def plot_fluxes_elsasser(post, args):
                     linestyle="dashed",
                 )
 
-            # Plot requested Elsasser injection
+            # Plot mean measured Elsasser injection
             axs_dict[sign].axhline(
                 injection_rates[sign] / energy_injection_rate,
                 color=sim_color,
