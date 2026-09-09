@@ -516,6 +516,7 @@ void add_forcing_meyrand(
 }
 #endif // FORCING_METHOD_MEYRAND
 
+#ifndef FORCING_FROM_SOLVER
 __device__ void add_forcing_explicit(
     const size_t index,
     const FLUCS_FLOAT dt,
@@ -538,6 +539,7 @@ __device__ void add_forcing_explicit(
         );
     #endif
 }
+#endif // not FORCING_FROM_SOLVER
 
 #endif // FORCING
 
