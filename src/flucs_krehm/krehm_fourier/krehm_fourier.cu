@@ -516,6 +516,113 @@ void add_forcing_meyrand(
 }
 #endif // FORCING_METHOD_MEYRAND
 
+#ifndef FORCING_FROM_SOLVER
+#if defined(FORCING_METHOD_PHASE)
+__device__ __forceinline__
+void add_forcing_phase(
+    const size_t index,
+    const FLUCS_FLOAT dt,
+    const FLUCS_FLOAT current_time,
+    const long long current_step,
+    const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
+    FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
+)
+{
+    // Unused variables
+    (void)current_step;
+
+    if (!forcing_range_mask(index))
+        return;
+
+    // Indices
+    indices3d_t indices = get_indices3d<NZ, NX, HALF_NY>(index);
+    const size_t ikx = indices.ikx;
+    const size_t iky = indices.iky;
+
+    // Wavenumbers
+    const FLUCS_FLOAT kx = kx_from_ikx(ikx);
+    const FLUCS_FLOAT ky = ky_from_iky(iky);
+
+    const FLUCS_FLOAT kperp2 = kx*kx + ky*ky;
+
+    if (kperp2 == ((FLUCS_FLOAT)0.0))
+        return;
+
+    // Various factors that appear in the terms below
+    const FLUCS_FLOAT gamma_factor = one_minus_gamma0_over_alpha(kperp2);
+    const FLUCS_FLOAT one_plus_taubarinv = FLOAT_ONE + taubarinv(kperp2);
+    const FLUCS_FLOAT one_plus_kperp2de2 = FLOAT_ONE + kperp2 * DE2;
+    const FLUCS_FLOAT helicity_prefactor = 2 * gamma_factor * kperp2 * one_plus_kperp2de2;
+
+    // Fields
+    const FLUCS_COMPLEX phi = previous_fields_forcing[0];
+    const FLUCS_COMPLEX apar = previous_fields_forcing[1];
+
+    // Useful combinations of fields
+    const FLUCS_FLOAT phi2 = (
+        phi.real()*phi.real() + phi.imag()*phi.imag()
+    );
+    const FLUCS_FLOAT apar2 = (
+        apar.real()*apar.real() + apar.imag()*apar.imag()
+    );
+    const FLUCS_FLOAT real_phi_conj_apar = (
+        phi.real() * apar.real() + phi.imag() * apar.imag()
+    );
+    const FLUCS_FLOAT imag_phi_conj_apar = (
+        phi.imag() * apar.real() - phi.real() * apar.imag()
+    );
+
+    // Energies
+    const FLUCS_FLOAT W_phi = one_plus_taubarinv * gamma_factor * kperp2 * phi2;
+    const FLUCS_FLOAT W_apar = one_plus_kperp2de2 * kperp2 * apar2;
+
+    // Helicity injection rate
+    const FLUCS_FLOAT helicity_injection_rate = (
+        FORCING_IMBALANCE
+        * (FORCING_EPSILON_PHI + FORCING_EPSILON_APAR)
+    );
+
+    // Amplitude and relative-phase rates
+    const FLUCS_FLOAT phi_growth_rate = (
+        FORCING_EPSILON_PHI * ((FLUCS_FLOAT)0.5) / W_phi
+    );
+    const FLUCS_FLOAT apar_growth_rate = (
+        FORCING_EPSILON_APAR * ((FLUCS_FLOAT)0.5) / W_apar
+    );
+
+    // Regularise expressions to avoid singularities from aligned fields
+    FLUCS_FLOAT regularisation  = ((FLUCS_FLOAT)0.0);
+    FLUCS_FLOAT apar_phase_rate = ((FLUCS_FLOAT)0.0);
+
+    if (imag_phi_conj_apar * imag_phi_conj_apar > FLUCS_EPSILON * phi2 * apar2) 
+    {
+        apar_phase_rate = (
+            + helicity_injection_rate
+            - helicity_prefactor
+                * (phi_growth_rate + apar_growth_rate)
+                * real_phi_conj_apar
+        ) / (helicity_prefactor * imag_phi_conj_apar);
+
+        const FLUCS_FLOAT apar_phase_rate_max = (
+            ((FLUCS_FLOAT)0.1) / dt 
+            // Factor of 0.1 is chosen to avoid transients
+        );
+        const FLUCS_FLOAT ratio = (
+            apar_phase_rate/ (((FLUCS_FLOAT)2.0) * apar_phase_rate_max)
+        );
+
+        regularisation = FLOAT_ONE / (FLOAT_ONE + ratio * ratio);
+    }
+
+    // Construct forcing
+    explicit_terms[0] -= regularisation * phi_growth_rate * phi;
+    explicit_terms[1] -= FLUCS_COMPLEX(
+        regularisation * apar_growth_rate,
+        regularisation * apar_phase_rate
+    ) * apar;
+}
+#endif // FORCING_METHOD_PHASE
+
 __device__ void add_forcing_explicit(
     const size_t index,
     const FLUCS_FLOAT dt,
@@ -537,7 +644,15 @@ __device__ void add_forcing_explicit(
             previous_fields_forcing, explicit_terms
         );
     #endif
+
+    #if defined(FORCING_METHOD_PHASE)
+        add_forcing_phase(
+            index, dt, current_time, current_step,
+            previous_fields_forcing, explicit_terms
+        );
+    #endif
 }
+#endif // not FORCING_FROM_SOLVER
 
 #endif // FORCING
 

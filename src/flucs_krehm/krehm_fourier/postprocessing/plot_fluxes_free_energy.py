@@ -35,22 +35,6 @@ def plot_fluxes_free_energy(post, args):
         sim_label = pl.Path(nc_path).parent.name
         sim_color = plt.cm.rainbow(np.linspace(0, 1, len(nc_paths)))[index]
 
-        # Get injection rates (assumes same forcing for all groups)
-        input_file = post.load_netcdf_input_files(nc_path, groups=groups)[-1]
-
-        forcing_input = input_file["forcing"]
-        if forcing_input["method"] == "elsasser":
-            energy_injection_rate = forcing_input["energy_injection_rate"]
-        elif forcing_input["method"] == "meyrand":
-            energy_injection_rate = (
-                + forcing_input["energy_injection_rate_phi"]
-                + forcing_input["energy_injection_rate_apar"]
-            )
-        else:
-            raise ValueError(
-                f"Unsupported forcing method '{forcing_input['method']}'."
-            )
-
         # Read data from netCDF file
         time = post.load_netcdf_variable(nc_path, "time", groups=groups)[0]
         nonlinear, _, dims_dicts = post.load_netcdf_variable(
@@ -58,6 +42,11 @@ def plot_fluxes_free_energy(post, args):
             variables["nonlinear"],
             groups=groups,
         )
+        dWdt_forcing = post.load_netcdf_variable(
+            nc_path,
+            variables["forcing"],
+            groups=groups,
+        )[0]
 
         # Validate dimension
         dims = next(dims for dims in reversed(dims_dicts) if dims)
@@ -71,12 +60,17 @@ def plot_fluxes_free_energy(post, args):
         # Mask for logarithmic axis
         mask = dimension > 0.0
         dimension = dimension[mask]
-        nonlinear_flux = -nonlinear[:, mask] / energy_injection_rate
 
         # Time average
         mask_time = time >= (
             np.min(time) + (1.0 - fraction) * (np.max(time) - np.min(time))
         )
+
+        # Mean measured energy injection rate
+        energy_injection_rate = np.nanmean(dWdt_forcing[mask_time, -1])
+
+        # Nonlinear flux
+        nonlinear_flux = -nonlinear[:, mask] / energy_injection_rate
         nonlinear_flux_avg = np.nanmean(nonlinear_flux[mask_time], axis=0)
 
         # Plot nonlinear flux
@@ -91,18 +85,16 @@ def plot_fluxes_free_energy(post, args):
 
         # Plot budget terms if required
         if args.budget:
-            dWdt_forcing = post.load_netcdf_variable(
-                nc_path,
-                variables["forcing"],
-                groups=groups,
-            )[0]
             dWdt_hyperdissipation = post.load_netcdf_variable(
                 nc_path,
                 variables["hyperdissipation"],
                 groups=groups,
             )[0]
 
-            forcing_flux = (1.0 - dWdt_forcing[:, mask] / energy_injection_rate)
+            forcing_flux = (
+                dWdt_forcing[:, -1, None] - dWdt_forcing[:, mask]
+            ) / energy_injection_rate
+            
             hyperdissipation_flux = (
                 -dWdt_hyperdissipation[:, mask] / energy_injection_rate
             )
