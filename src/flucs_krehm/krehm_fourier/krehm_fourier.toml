@@ -16,8 +16,8 @@ ermhd_betai = 0.0
 [forcing]
 
 # Generic wavenumber ranges
-range_kperp = [1.5, 2.5]
-range_kz = [0.5, 1.5]
+range_kperp = []
+range_kz = []
 
 # method = "elsasser"
 energy_injection_rate = 0.1
