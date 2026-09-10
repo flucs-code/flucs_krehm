@@ -23,6 +23,7 @@ from .krehm_fourier_diagnostics import (
 from .krehm_fourier_forcing import (
     KREHMFourierElsasserForcing,
     KREHMFourierMeyrandForcing,
+    KREHMFourierPhaseForcing
 )
 
 class KREHMFourier(FourierSystem):
@@ -55,6 +56,7 @@ class KREHMFourier(FourierSystem):
     system_forcing_methods: ClassVar[dict[str, FourierSystemForcing]] = {
         "elsasser": KREHMFourierElsasserForcing,
         "meyrand": KREHMFourierMeyrandForcing,
+        "phase": KREHMFourierPhaseForcing,
     }
 
     def ready(self):
