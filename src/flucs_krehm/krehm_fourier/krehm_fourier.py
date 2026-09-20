@@ -2,11 +2,13 @@
 Pseudospectral Fourier implementation of the isothermal KREHM system from
 Adkins et al. (2024).
 """
+from __future__ import annotations
+
 from typing import ClassVar
 
-import cupy as cp
 import numpy as np
 from scipy.special import i0e
+from flucs import cupy as cp
 from flucs.diagnostic import FlucsDiagnostic
 from flucs.solvers.fourier.fourier_system import FourierSystem, FourierSystemForcing
 from flucs.input import InvalidFlucsInputFileError

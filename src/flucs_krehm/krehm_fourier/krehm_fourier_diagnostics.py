@@ -4,8 +4,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from collections.abc import Callable
 
-import cupy as cp
-
+from flucs import cupy as cp
 from flucs.diagnostic import FlucsDiagnostic, FlucsDiagnosticVariable
 from flucs.solvers.fourier.fourier_system_reductions import FourierReductions
 from flucs.utilities.messages import flucsprint
