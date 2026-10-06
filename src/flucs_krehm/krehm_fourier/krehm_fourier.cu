@@ -39,7 +39,7 @@ FLUCS_FLOAT taubarinv(FLUCS_FLOAT kperp2) {
 __device__ void get_linear_matrix(
     const size_t index, 
     const FLUCS_FLOAT dt,
-    const FLUCS_FLOAT current_time,
+    const double current_time,
     const long long current_step, 
     FLUCS_COMPLEX matrix[2][2]
 ){
@@ -190,7 +190,7 @@ __global__ void find_nonlinear_bits(
 __device__ void add_nonlinear_terms(
     const size_t index,
     const FLUCS_FLOAT dt,
-    const FLUCS_FLOAT current_time,
+    const double current_time,
     const long long current_step,
     const FLUCS_COMPLEX dft_bits_global[NUMBER_OF_DFT_BITS][HALFSIZE],
     FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
@@ -355,7 +355,7 @@ __device__ __forceinline__
 void add_forcing_elsasser(
     const size_t index,
     const FLUCS_FLOAT dt,
-    const FLUCS_FLOAT current_time,
+    const double current_time,
     const long long current_step,
     const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
     FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
@@ -436,7 +436,7 @@ __device__ __forceinline__
 void add_forcing_meyrand(
     const size_t index,
     const FLUCS_FLOAT dt,
-    const FLUCS_FLOAT current_time,
+    const double current_time,
     const long long current_step,
     const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
     FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
@@ -522,7 +522,7 @@ __device__ __forceinline__
 void add_forcing_phase(
     const size_t index,
     const FLUCS_FLOAT dt,
-    const FLUCS_FLOAT current_time,
+    const double current_time,
     const long long current_step,
     const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
     FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
@@ -626,7 +626,7 @@ void add_forcing_phase(
 __device__ void add_forcing_explicit(
     const size_t index,
     const FLUCS_FLOAT dt,
-    const FLUCS_FLOAT current_time, 
+    const double current_time,
     const long long current_step,
     const FLUCS_COMPLEX previous_fields_forcing[NUMBER_OF_FIELDS],
     FLUCS_COMPLEX explicit_terms[NUMBER_OF_FIELDS]
@@ -774,7 +774,7 @@ struct FreeEnergyUpar_Functor {
 struct FreeEnergyForcing_Functor {
     const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFSIZE];
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
 
@@ -822,7 +822,7 @@ struct FreeEnergyForcing_Functor {
 struct FreeEnergyNonlinear_Functor {
     const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
     const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFSIZE];
 
@@ -924,7 +924,7 @@ struct FreeEnergyThetap_Functor {
 struct FreeEnergyThetapForcing_Functor {
     const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFSIZE];
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -958,7 +958,7 @@ struct FreeEnergyThetapForcing_Functor {
 struct FreeEnergyThetapNonlinear_Functor {
     const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
     const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFSIZE];
 
@@ -1039,7 +1039,7 @@ struct FreeEnergyThetam_Functor {
 struct FreeEnergyThetamForcing_Functor {
     const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFSIZE];
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1073,7 +1073,7 @@ struct FreeEnergyThetamForcing_Functor {
 struct FreeEnergyThetamNonlinear_Functor {
     const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
     const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFSIZE];
 
@@ -1231,7 +1231,7 @@ struct HelicityUpar_Functor {
 struct HelicityForcing_Functor {
     const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFSIZE];
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1282,7 +1282,7 @@ struct HelicityForcing_Functor {
 struct HelicityNonlinear_Functor {
     const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
     const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFSIZE];
 
@@ -1379,7 +1379,7 @@ struct HelicityThetap_Functor {
 struct HelicityThetapForcing_Functor {
     const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFSIZE];
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1405,7 +1405,7 @@ struct HelicityThetapForcing_Functor {
 struct HelicityThetapNonlinear_Functor {
     const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
     const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFSIZE];
 
@@ -1480,7 +1480,7 @@ struct HelicityThetam_Functor {
 struct HelicityThetamForcing_Functor {
     const FLUCS_COMPLEX (* __restrict__ fields_global)[HALFSIZE];
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
 
     __device__ __forceinline__ FLUCS_FLOAT operator()(size_t index) const {
@@ -1506,7 +1506,7 @@ struct HelicityThetamForcing_Functor {
 struct HelicityThetamNonlinear_Functor {
     const FLUCS_COMPLEX* __restrict__ fields_global;
     const FLUCS_FLOAT dt;
-    const FLUCS_FLOAT current_time;
+    const double current_time;
     const long long current_step;
     const FLUCS_COMPLEX (* __restrict__ dft_bits_global)[HALFSIZE];
 
